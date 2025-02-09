@@ -30,14 +30,30 @@ def search_capacitor(session, params):
     """Search for capacitors using Digi-Key API"""
     
     FILTER_IDS = {
-        "Packaging": {  "Radial, Can" : "392320", "Axial" : "392322" },
-        "Polarization": { "Polar": "388275", "Non-Polar": "388276" },
-        "Mounting": { "Through Hole": "411897", "Surface Mount": "411898" },
-        "Lead Spacing": { "0.138\" (3.50mm)": "11374", "0.197\" (5.00mm)": "11375" },
-        "Height": { "0.591\" (13.00mm)": "26001", "0.315\" (8.00mm)": "26000" },
-        "Diameter": { "0.315\" Dia (8.00mm)": "18775", "0.394\" Dia (10.00mm)": "18776" },
-        "Lifetime": { "7000 Hrs @ 105°C": "272852", "1000 Hrs @ 105°C": "272853" },
-        "Manufacturer": { "Nichicon": "493", "Panasonic": "10", "Vishay BC Components": "111" }
+        "Packaging": {  "Radial, Can" : "392320",
+                        "Axial, Can" : "317217",
+                        "Radial, Can - Snap-In" : "392328",
+                        "Radial, Can - Solder Lug" : "392332" },
+        "Polarization": {   "Polar": "388275",
+                            "Non-Polar": "319798" },
+        "Mounting": {   "Through Hole": "411897",
+                        "Surface Mount": "409393" },
+        "SMD Spacing": {    "0.138\" (3.50mm)": "11374",
+                            "0.197\" (5.00mm)": "11375" },
+        "Lead Spacing": {   "0.138\" (3.50mm)": "11374", 
+                            "0.197\" (5.00mm)": "11375" },
+        "Height": { "0.591\" (13.00mm)": "26001",
+                    "0.315\" (8.00mm)": "26000" },
+        "Diameter": {   "0.315\" Dia (8.00mm)": "18775",
+                        "0.394\" Dia (10.00mm)": "18776" },
+        "Lifetime": {   "7000 Hrs @ 105°C": "272852",
+                        "1000 Hrs @ 105°C": "272853" },
+        "Manufacturer": {   "Chemi-Con": "565",
+                            "Nichicon": "493",
+                            "Panasonic": "10",
+                            "Rubycon": "13",
+                            "Würth Elektronik": "732",
+                            "Vishay Sprague": "718" }
     }
 
     data = {
