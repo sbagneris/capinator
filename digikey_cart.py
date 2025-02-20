@@ -40,7 +40,16 @@ def search_capacitor(session, params):
             "Radial, Can - Snap-In": "392328",
             "Radial, Can - Solder Lug": "392332",
         },
-        "Polarization": {"Surface Mount": "409393"},
+        "Mounting Type": {
+            "Chassis Mount": "329230",
+            "Chassis, Stud Mount": "329314",
+            "Clamp Mount": "457001",
+            "Surface Mount": "409393",
+            "Through Hole": "411897",
+            "Through Hole, Press-Fit": "411919",
+            "User Defined": "419016",
+        },
+        "Polarization": {"Bi-Polar": "319798", "Polar": "388275"},
         "SMD Spacing": {
             '0.130" L x 0.130" W (3.30mm x 3.30mm)': "11211",
             '0.157" Dia x 0.217" L (4.00mm x 5.50mm)': "811016",
