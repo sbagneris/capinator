@@ -1,3 +1,4 @@
 # Ignore the .vscode directory
 .vscode/
 .venv/
+libs/__pycache__/*.pyc

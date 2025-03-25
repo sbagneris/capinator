@@ -1,2 +1,7 @@
-capacitance,voltage,tolerance,manufacturer_part
-100uF,50V,±20%,ECA-1HM101
+capacitance,voltage,mounting,packaging,polarization,lead spacing,min lifetime,temperature
+100,50,,,,,,,
+220,35,,,,,,,
+330,25,,,,,,,
+470,16,,,,,,,
+680,10,,,,,,,
+1000,6.3,,,,,,,
