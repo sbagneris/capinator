@@ -1,9 +1,11 @@
-# Description: Digikey API wrapper
+# Description: Digikey API wrapper for searching capacitors
+from os import getenv
+from typing import Any, Dict, List
 from requests_oauthlib import OAuth2Session
 from oauthlib.oauth2 import BackendApplicationClient
 
 FILTER_VALS = {
-    "Packaging": {
+    "Package / Case": {
         "Radial, Can": "392320",
         "Axial, Can": "317217",
         "Radial, Can - Snap-In": "392328",
@@ -19,7 +21,7 @@ FILTER_VALS = {
         "User Defined": "419016",
     },
     "Polarization": {"Bi-Polar": "319798", "Polar": "388275"},
-    "SMD Spacing": {
+    "SMD Land Size": {
         '0.130" L x 0.130" W (3.30mm x 3.30mm)': "11211",
         '0.157" Dia x 0.217" L (4.00mm x 5.50mm)': "811016",
         '0.169" L x 0.169" W (4.30mm x 4.30mm)': "12680",
@@ -1122,7 +1124,7 @@ FILTER_VALS = {
         '4.800" L x 3.640" W (121.92mm x 92.46mm)': "821281",
         '5.390" L x 2.900" W (136.91mm x 73.66mm)': "821282",
     },
-    "Lifetime": {
+    "Lifetime @ Temp": {
         "500 Hrs @ 85°C": "236304",
         "1000 Hrs @ 105°C": "68143",
         "1000 Hrs @ 125°C": "68144",
@@ -1210,6 +1212,34 @@ FILTER_VALS = {
         "45000 Hrs @ 105°C": "694904",
         "60000 Hrs @ 70°C": "255744",
     },
+    "Operating Temperature": {
+        "-55°C ~ 105°C": "242904",
+        "-55°C ~ 125°C": "242918",
+        "-55°C ~ 135°C": "242926",
+        "-55°C ~ 150°C": "242931",
+        "-55°C ~ 85°C": "243000",
+        "-40°C ~ 105°C": "212434",
+        "-40°C ~ 125°C": "212478",
+        "-40°C ~ 130°C": "212489",
+        "-40°C ~ 135°C": "212492",
+        "-40°C ~ 150°C": "212507",
+        "-40°C ~ 175°C": "212522",
+        "-40°C ~ 55°C": "212566",
+        "-40°C ~ 60°C": "212571",
+        "-40°C ~ 85°C": "212617",
+        "-40°C ~ 95°C": "212644",
+        "-25°C ~ 105°C": "156393",
+        "-25°C ~ 125°C": "156400",
+        "-25°C ~ 130°C": "156406",
+        "-25°C ~ 140°C": "156408",
+        "-25°C ~ 150°C": "156410",
+        "-25°C ~ 60°C": "156430",
+        "-25°C ~ 85°C": "156454",
+        "-20°C ~ 55°C": "139395",
+        "-20°C ~ 70°C": "139409",
+        "-20°C ~ 85°C": "139428",
+        "20°C ~ 85°C": "139427",
+    },
 }
 
 MANUFACTURER_IDS = {
@@ -1257,27 +1287,28 @@ CATEGORY_IDS = {
 PARAMETER_IDS = {
     "Capacitance": 2049,
     "Voltage - Rated": 2079,
-    "Mounting Type": 69,
     "Package / Case": 16,
+    "Mounting Type": 69,
     "Polarization": 52,
-    "Lifetime": 725,
+    "SMD Land Size": 884,
     "Lead Spacing": 508,
     "Height": 1500,
     "Dimensions": 46,
+    "Lifetime @ Temp": 725,
+    "Operating Temperature": 252,
 }
 
 # Digi-Key API configuration
 API_BASE = "https://api.digikey.com"
-CLIENT_ID = "exmEWdjlz2bgUAtBNz0zDMC89LZ0gFdg"
-CLIENT_SECRET = "YuxtSiWGQp0KHAMj"
+CLIENT_ID = getenv("DIGIKEY_CLIENT_ID")
+CLIENT_SECRET = getenv("DIGIKEY_CLIENT_SECRET")
 
 # API endpoints
 SEARCH_API = "/products/v4/search/keyword"
 CART_API = "/Ordering/v3/Cart/Items"
 CATEGORIES = "/products/v4/search/categories"
 
-class DigiKeyV4():
- 
+class DigiKeyV4:
     def __init__(self):
         super().__init__()
 
@@ -1290,19 +1321,102 @@ class DigiKeyV4():
             token_url=f"{API_BASE}/v1/oauth2/token", client_secret=CLIENT_SECRET
         )
         return oauth
-    
-    def make_payload(self, **kwargs):
+
+    def is_temp_in_range(self, range_str: str, value: int, fudge: int = 0) -> bool:
+        """
+        Check if the given value is within the temperature range provided.
+
+        The range_str should be in the format "<min>°C ~ <max>°C", e.g., "-55°C ~ 105°C".
+
+        :param range_str: A string representing the temperature range.
+        :param value: An integer temperature to check.
+        :return: True if value is between min and max (inclusive); otherwise False.
+        """
+        parts = range_str.replace("°C", "").split("~")
+        if len(parts) != 2:
+            raise ValueError(
+                "Input string is not in expected format '<min>°C ~ <max>°C'."
+            )
+
+        try:
+            lower = int(parts[0].strip()) - (int(parts[0].strip) * fudge) / 100
+            upper = int(parts[1].strip()) + (int(parts[1].strip) * fudge) / 100
+        except ValueError as e:
+            raise ValueError("Failed to convert temperature values to integers.") from e
+
+        return lower <= value <= upper
+
+    def is_lifetime_in_range(
+        self, rating_str: str, temp: int, value: int, fudge: int = 0
+    ) -> bool:
+        """
+        Check if the given value is within the lifetime range provided.
+
+        The range_str should be in the format "<hours> Hrs @ <temp>°C", e.g., "1000 Hrs @ 105°C".
+
+        :param range_str: A string representing the lifetime range.
+        :param temp: An integer temperature.
+        :param value: An integer lifetime.
+        :return: True if value is above value and temp (inclusive); otherwise False.
+        """
+        parts = rating_str.replace(" Hrs", "").replace("°C", "").split("@")
+        if len(parts) != 2:
+            raise ValueError(
+                "Input string is not in expected format '<hours> Hrs @ <temp>°C'."
+            )
+
+        try:
+            hours = int(parts[0].strip())
+            temp_rating = int(parts[1].strip())
+        except ValueError as e:
+            raise ValueError(
+                "Failed to convert lifetime and temp values to integers."
+            ) from e
+
+        return (
+            hours >= value - (value * fudge) / 100
+            and temp_rating >= temp - (temp * fudge) / 100
+        )
+
+    def make_temperture_filter(self, temp: int, fudge: int = 0) -> List[Dict[str, str]]:
+        filtervals = []
+        for key, val in FILTER_VALS["Operating Temperature"].items():
+            if self.is_temp_in_range(range_str=key, value=temp, fudge=fudge):
+                filtervals.append({"Id": val})
+        return filtervals
+
+    def make_lifetime_filter(
+        self, lifetime: int, temp: int, fudge: int = 0
+    ) -> List[Dict[str, str]]:
+        filtervals = []
+        for key, val in FILTER_VALS["Lifetime @ Temp"].items():
+            if self.is_lifetime_in_range(
+                range_str=key, temp=temp, value=lifetime, fudge=fudge
+            ):
+                filtervals.append({"Id": val})
+        return filtervals
+
+    def make_payload(self, **kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """Create a payload for the Digi-Key search API"""
+
+        if "fudge" in kwargs:
+            fudge = int(kwargs["fudge"])
+        else:
+            fudge = 0
 
         payload = {
             "Limit": 10,
             "FilterOptionsRequest": {
                 "ManufacturerFilter": [{"Id": "493"}, {"Id": "10"}, {"Id": "1189"}],
-                "CategoryFilter": [{"Id": CATEGORY_IDS["Aluminum Electrolytic Capacitors"]}],
+                "CategoryFilter": [
+                    {"Id": CATEGORY_IDS["Aluminum Electrolytic Capacitors"]}
+                ],
                 "MarketPlaceFilter": "ExcludeMarketPlace",
                 "MinimumQuantityAvailable": 1,
                 "ParameterFilterRequest": {
-                    "CategoryFilter": {"Id": CATEGORY_IDS["Aluminum Electrolytic Capacitors"]},
+                    "CategoryFilter": {
+                        "Id": CATEGORY_IDS["Aluminum Electrolytic Capacitors"]
+                    },
                     "ParameterFilters": [],
                 },
                 "SearchOptions": ["InStock"],
@@ -1313,75 +1427,151 @@ class DigiKeyV4():
         if "keywords" in kwargs and len(kwargs["keywords"]) > 0:
             for kw in kwargs["keywords"]:
                 payload["Keywords"] += kw + " "
+
         if "limit" in kwargs:
             payload["Limit"] = kwargs["limit"]
+
         if "manufacturers" in kwargs and len(kwargs["manufacturers"]) > 0:
             payload["FilterOptionsRequest"]["ManufacturerFilter"] = []
             for man in kwargs["manufacturers"]:
-                payload["FilterOptionsRequest"]["ManufacturerFilter"].append({"Id": MANUFACTURER_IDS[man]})
-        if "min_qty" in kwargs:
-            payload["FilterOptionsRequest"]["MinimumQuantityAvailable"] = kwargs["min_qty"]
+                payload["FilterOptionsRequest"]["ManufacturerFilter"].append(
+                    {"Id": MANUFACTURER_IDS[man]}
+                )
+
+        if "qty" in kwargs:
+            payload["FilterOptionsRequest"]["MinimumQuantityAvailable"] = kwargs["qty"]
+
         if "capacitance" in kwargs:
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append({
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(
+                {
                     "ParameterId": PARAMETER_IDS["Capacitance"],
-                    "FilterValues": [{"Id": str(kwargs["capacitance"]) + " uF"}]})
+                    "FilterValues": [{"Id": str(kwargs["capacitance"]) + " uF"}],
+                }
+            )
+
         if "voltage" in kwargs:
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append({
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(
+                {
                     "ParameterId": PARAMETER_IDS["Voltage - Rated"],
-                    "FilterValues": [{"Id": str(kwargs["voltage"]) + " V"}]})
-        if "packaging" in kwargs and len(kwargs["packaging"]) > 0:
+                    "FilterValues": [{"Id": str(kwargs["voltage"]) + " V"}],
+                }
+            )
+
+        if "package" in kwargs:
             filter_vals = {
                 "ParameterId": PARAMETER_IDS["Package / Case"],
-                "FilterValues": []}
-            for pack in kwargs["packaging"]:
-                filter_vals["FilterValues"].append({"Id": FILTER_VALS["Package / Case"][pack]})
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append(filter_vals)
-        if "lifetime" in kwargs and len(kwargs["lifetime"]) > 0:
+                "FilterValues": [{"Id": FILTER_VALS["Package / Case"][kwargs["package"]]}],
+            }
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(filter_vals)
+
+        filter_vals = {"ParameterId": PARAMETER_IDS["Mounting Type"], "FilterValues": []}
+        if "mounting" in kwargs:
+            if kwargs["mounting"] == "SMD":
+                mounting = "Surface Mount"
+            elif kwargs["mounting"] == "THT":
+                mounting = "Through Hole"
+            else:
+                mounting = kwargs["mounting"]
+            filter_vals["FilterValues"] = [{"Id": FILTER_VALS["Mounting Type"][mounting]}]
+        else: # defaults to Through Hole
+            filter_vals["FilterValues"] = [{"Id": FILTER_VALS["Mounting Type"]["Through Hole"]}]
+        payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+            "ParameterFilters"
+        ].append(filter_vals)
+
+        if "polarization" in kwargs:
+            if kwargs["polarization"] == "NP" or kwargs["polarization"] == "BP":
+                polarization = "Bi-Polar"
+        else:
+            polarization = "Polar" # defaults to Polarized
+        filter_vals = {
+            "ParameterId": PARAMETER_IDS["Polarization"],
+            "FilterValues": [{"Id": FILTER_VALS["Polarization"][polarization]}],
+        }
+        payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+            "ParameterFilters"
+        ].append(filter_vals)
+
+        if "smd_land_size" in kwargs and len(kwargs["smd_land_size"]) > 0:
             filter_vals = {
-                "ParameterId": PARAMETER_IDS["Lifetime"],
-                "FilterValues": []}
-            for life in kwargs["lifetime"]:
-                filter_vals["FilterValues"].append({"Id": FILTER_VALS["Lifetime"][life]})
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append(filter_vals)
-        if "mounting" in kwargs and len(kwargs["mounting"]) > 0:
-            filter_vals = {
-                "ParameterId": PARAMETER_IDS["Mounting Type"],
-                "FilterValues": []}
-            for mount in kwargs["mounting"]:
-                filter_vals["FilterValues"].append({"Id": FILTER_VALS["Mounting Type"][mount]})
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append(filter_vals)
-        if "polarization" in kwargs and len(kwargs["polarization"]) > 0:
-            filter_vals = {
-                "ParameterId": PARAMETER_IDS["Polarization"],
-                "FilterValues": []}
-            for polar in kwargs["polarization"]:
-                filter_vals["FilterValues"].append({"Id": FILTER_VALS["Polarization"][polar]})
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append(filter_vals)
+                "ParameterId": PARAMETER_IDS["SMD Land Size"],
+                "FilterValues": [],
+            }
+            for smd in kwargs["smd_land_size"]:
+                filter_vals["FilterValues"].append(
+                    {"Id": FILTER_VALS["SMD Land Size"][smd]}
+                )
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(filter_vals)
+
         if "lead_spacing" in kwargs and len(kwargs["lead_spacing"]) > 0:
             filter_vals = {
                 "ParameterId": PARAMETER_IDS["Lead Spacing"],
-                "FilterValues": []}
+                "FilterValues": [],
+            }
             for lead in kwargs["lead_spacing"]:
-                filter_vals["FilterValues"].append({"Id": FILTER_VALS["Lead Spacing"][lead]})
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append(filter_vals)
+                filter_vals["FilterValues"].append(
+                    {"Id": FILTER_VALS["Lead Spacing"][lead]}
+                )
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(filter_vals)
+
         if "height" in kwargs and len(kwargs["height"]) > 0:
-            filter_vals = {
-                "ParameterId": PARAMETER_IDS["Height"],
-                "FilterValues": []}
+            filter_vals = {"ParameterId": PARAMETER_IDS["Height"], "FilterValues": []}
             for h in kwargs["height"]:
                 filter_vals["FilterValues"].append({"Id": FILTER_VALS["Height"][h]})
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append(filter_vals)
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(filter_vals)
+
         if "dimensions" in kwargs and len(kwargs["dimensions"]) > 0:
             filter_vals = {
                 "ParameterId": PARAMETER_IDS["Dimensions"],
-                "FilterValues": []}
+                "FilterValues": [],
+            }
             for dim in kwargs["dimensions"]:
-                filter_vals["FilterValues"].append({"Id": FILTER_VALS["Dimensions"][dim]})
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"]["ParameterFilters"].append(filter_vals)
+                filter_vals["FilterValues"].append(
+                    {"Id": FILTER_VALS["Dimensions"][dim]}
+                )
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(filter_vals)
+
+        if "lifetime" in kwargs:
+            if "temp" in kwargs:
+                temp = int(kwargs["temp"])
+            else:
+                temp = 85
+            filter_vals = {
+                "ParameterId": PARAMETER_IDS["Lifetime @ Temp"],
+                "FilterValues": self.make_lifetime_filter(
+                    int(kwargs["lifetime"]), temp, fudge
+                ),
+            }
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(filter_vals)
+
+        if "temp" in kwargs:
+            filter_vals = {
+                "ParameterId": PARAMETER_IDS["Operating Temperature"],
+                "FilterValues": self.make_temperture_filter(int(kwargs["temp"]), fudge),
+            }
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(filter_vals)
 
         return payload
 
-    def find_all_digikey_pn(self, params):
+    def find_all_digikey_pn(self, params: Dict[str, str]) -> List[str]:
         """Find all matching Digi-Key part numbers"""
         data = self.make_payload(**params)
 
@@ -1400,11 +1590,14 @@ class DigiKeyV4():
             if len(results["Products"]) == 0:
                 return None
             else:
-                return [product["ManufacturerProductNumber"] for product in results["Products"]]
-            
+                return [
+                    product["ManufacturerProductNumber"]
+                    for product in results["Products"]
+                ]
+
         return None
 
-    def find_digikey_pn(self, params):
+    def find_digikey_pn(self, params: Dict[str, str]) -> str:
         """Find first matching Digi-Key part number"""
         params["limit"] = 1
         return self.find_all_digikey_pn(params)[0]

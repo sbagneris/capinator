@@ -3,10 +3,6 @@
 import csv
 import libs.digikey as dk
 
-# Mouser API configuration
-# MOUSER_API_KEY = "e74ce92e-fc89-49af-8111-37f23c522a42"
-# MOUSER_API_BASE = "https://api.mouser.com/api/v1"
-
 def process_csv(file_path):
     """Process CSV file and build cart"""
 
