@@ -3,5 +3,6 @@
 .venv/
 libs/__pycache__/*.pyc
 util/ext_*
+ext_*
 *.sh
 
