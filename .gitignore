@@ -2,3 +2,6 @@
 .vscode/
 .venv/
 libs/__pycache__/*.pyc
+utils/*
+*.sh
+
