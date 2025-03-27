@@ -1,4 +1,5 @@
 # Description: Digikey API wrapper for searching capacitors
+import re
 from os import getenv
 from typing import Any, Dict, List
 from requests_oauthlib import OAuth2Session
@@ -6,10 +7,31 @@ from oauthlib.oauth2 import BackendApplicationClient
 
 FILTER_VALS = {
     "Package / Case": {
-        "Radial, Can": "392320",
+        "Axial": "317190",
         "Axial, Can": "317217",
+        "Axial, Can - 3 Leads": "788392",
+        "Axial, Can - 4 Leads": "317218",
+        "FlatPack": "347933",
+        "FlatPack, Tabbed": "347934",
+        "Nonstandard SMD": "380440",
+        "Radial": "392278",
+        "Radial, Can": "392320",
+        "Radial, Can - 3 Lead": "392321",
+        "Radial, Can - 4 Lead": "392322",
+        "Radial, Can - 5 Lead": "392323",
+        "Radial, Can - Mounting Ring - 4 Lead": "392324",
+        "Radial, Can - Press-Fit - 4 Lead": "575388",
+        "Radial, Can - Press-Fit - 5 Lead": "575389",
+        "Radial, Can - Screw Terminals": "392326",
+        "Radial, Can - SMD": "392327",
         "Radial, Can - Snap-In": "392328",
+        "Radial, Can - Snap-In - 3 Lead": "392329",
+        "Radial, Can - Snap-In - 4 Lead": "392330",
+        "Radial, Can - Snap-In - 5 Lead": "392331",
         "Radial, Can - Solder Lug": "392332",
+        "Radial, Can - Solder Lug - 3 Lead": "478600",
+        "Radial, Can - Solder Lug - 4 Lead": "433928",
+        "Radial, Can - Solder Lug - 5 Lead": "392333",
     },
     "Mounting Type": {
         "Chassis Mount": "329230",
@@ -1308,6 +1330,7 @@ SEARCH_API = "/products/v4/search/keyword"
 CART_API = "/Ordering/v3/Cart/Items"
 CATEGORIES = "/products/v4/search/categories"
 
+
 class DigiKeyV4:
     def __init__(self):
         super().__init__()
@@ -1322,15 +1345,15 @@ class DigiKeyV4:
         )
         return oauth
 
-    def is_temp_in_range(self, range_str: str, value: int, fudge: int = 0) -> bool:
+    def is_temp_in_range(self, range_str: str, temp: int, fudge: int = 0) -> bool:
         """
-        Check if the given value is within the temperature range provided.
+        Check if the given temp value is within the temperature range described by range_str.
 
         The range_str should be in the format "<min>°C ~ <max>°C", e.g., "-55°C ~ 105°C".
 
         :param range_str: A string representing the temperature range.
-        :param value: An integer temperature to check.
-        :return: True if value is between min and max (inclusive); otherwise False.
+        :param temp: An integer temperature to check.
+        :return: True if value is between min and max (inclusive) found in range_str; otherwise False.
         """
         parts = range_str.replace("°C", "").split("~")
         if len(parts) != 2:
@@ -1344,20 +1367,20 @@ class DigiKeyV4:
         except ValueError as e:
             raise ValueError("Failed to convert temperature values to integers.") from e
 
-        return lower <= value <= upper
+        return lower <= temp <= upper
 
-    def is_lifetime_in_range(
-        self, rating_str: str, temp: int, value: int, fudge: int = 0
+    def does_rating_meets_lifetime_and_temp(
+        self, rating_str: str, lifetime: int, temp: int, fudge: int = 0
     ) -> bool:
         """
-        Check if the given value is within the lifetime range provided.
+        Check if the given lifetime @ temp rating string meets the lifetime and temp values provided.
 
-        The range_str should be in the format "<hours> Hrs @ <temp>°C", e.g., "1000 Hrs @ 105°C".
+        The rating_str should be in the format "<hours> Hrs @ <temp>°C", e.g., "1000 Hrs @ 105°C".
 
-        :param range_str: A string representing the lifetime range.
+        :param rating_str: A string representing the lifetime @ temp rating.
         :param temp: An integer temperature.
-        :param value: An integer lifetime.
-        :return: True if value is above value and temp (inclusive); otherwise False.
+        :param lifetime: An integer lifetime.
+        :return: True if rating_str meets both lifetime and temp values; otherwise False.
         """
         parts = rating_str.replace(" Hrs", "").replace("°C", "").split("@")
         if len(parts) != 2:
@@ -1374,14 +1397,86 @@ class DigiKeyV4:
             ) from e
 
         return (
-            hours >= value - (value * fudge) / 100
+            hours >= lifetime - (lifetime * fudge) / 100
             and temp_rating >= temp - (temp * fudge) / 100
         )
+
+    def is_dim_close_enough(self, dim_str: str, dim: float, fudge: int = 10) -> bool:
+        """
+        Check if the given dimention string is close enough to the dimention value provided
+        within a certain fudge factor (default 10%).
+
+        The dim_str should be in the format:
+        '<dim in inches>" (<dim in mm>mm)' e.g., '0.300" (7.62mm)'.
+
+        :param dim_str: A string representing the dimention both in inches and mm.
+        :param dim: A float dimention value to check in mm.
+        :param fudge: The allowable difference in percentage (default 10%).
+        :return: True if the provided dimention is within the fudge percentage of the dimention in dim_str;
+                 otherwise False.
+        """
+        try:
+            # Extract the mm value from spacing_str, e.g., "7.62" from '0.300" (7.62mm)'
+            mm_part = dim_str.split("(")[1].split("mm")[0].strip()
+            dim_mm = float(mm_part)
+        except (IndexError, ValueError) as e:
+            raise ValueError(
+                "Spacing string is not in the expected format '<inches>\" (<mm>mm)'."
+            ) from e
+
+        # Calculate percentage difference relative to the parsed spacing_mm.
+        percent_diff = abs(dim_mm - dim) / dim_mm * 100
+
+        return percent_diff <= fudge
+
+    def are_dims_close_enough(self, dims_str: str, dims: Dict[str, float], fudge: int = 10) -> bool:
+        """
+        Check if the given dimentions string is close enough to the dimention values provided
+        within a certain fudge factor (default 10%).
+
+        The dims_str can be of three distinct formats:
+        -> '<float>" Dia (<float>mm)' e.g, '0.335" Dia (8.50mm)'
+        -> '<float>" Dia x <float>" L (<float>mm x <float>mm)' e.g, '0.335" Dia x 0.709" L (8.50mm x 18.00mm)'
+        -> '<float>" L x <float>" W (<float>mm x <float>mm)' e.g, '0.335" L x 0.209" W (8.50mm x 5.30mm)'
+
+        :param dims_str: A string representing one or two dimentions both in inches and mm.
+        :param dims: A list of float dimention values to check in mm.
+        :param fudge: The allowable difference in percentage (default 10%).
+        :return: True if the provided dimention(s) is(are) within the fudge percentage of the dimentions in dims_str;
+                 otherwise False.
+        """
+        patterns = {
+            'dia': re.compile(r'^(\d+\.\d+)"\s*Dia\s*\((\d+\.\d+)mm\)$'),
+            'dia_len': re.compile(r'^(\d+\.\d+)"\s*Dia\s*x\s*(\d+\.\d+)"\s*L\s*\((\d+\.\d+)mm\s*x\s*(\d+\.\d+)mm\)$'),
+            'len_wid': re.compile(r'^(\d+\.\d+)"\s*L\s*x\s*(\d+\.\d+)"\s*W\s*\((\d+\.\d+)mm\s*x\s*(\d+\.\d+)mm\)$')
+        }
+
+        result = {'L': None, 'W': None}
+
+        for pat, regx in patterns:
+            match = re.match(dims_str, regx)
+            if match:
+                if pat == 'dia':
+                    result['W'] = float(match.group(2))
+                elif pat == 'dia_len':
+                    result['W'] = float(match.group(3))
+                    result['L'] = float(match.group(4))
+                elif pat == 'len_wid':
+                    result['L'] = float(match.group(3))
+                    result['W'] = float(match.group(4))
+                break
+
+        for d in dims.keys():
+            percent_diff = abs(result[d] - dims[d]) / result[d] * 100
+            if percent_diff >= fudge:
+                return False
+            
+        return True
 
     def make_temperture_filter(self, temp: int, fudge: int = 0) -> List[Dict[str, str]]:
         filtervals = []
         for key, val in FILTER_VALS["Operating Temperature"].items():
-            if self.is_temp_in_range(range_str=key, value=temp, fudge=fudge):
+            if self.is_temp_in_range(range_str=key, temp=temp, fudge=fudge):
                 filtervals.append({"Id": val})
         return filtervals
 
@@ -1390,9 +1485,27 @@ class DigiKeyV4:
     ) -> List[Dict[str, str]]:
         filtervals = []
         for key, val in FILTER_VALS["Lifetime @ Temp"].items():
-            if self.is_lifetime_in_range(
-                range_str=key, temp=temp, value=lifetime, fudge=fudge
+            if self.does_rating_meets_lifetime_and_temp(
+                rating_str=key, temp=temp, lifetime=lifetime, fudge=fudge
             ):
+                filtervals.append({"Id": val})
+        return filtervals
+
+    def make_lead_spacing_filter(
+        self, spacing: float, fudge: int = 10
+    ) -> List[Dict[str, str]]:
+        filtervals = []
+        for key, val in FILTER_VALS["Lead Spacing"].items():
+            if self.is_dim_close_enough(dim_str=key, dim=spacing, fudge=fudge):
+                filtervals.append({"Id": val})
+        return filtervals
+
+    def make_height_filter(
+        self, height: float, fudge: int = 10
+    ) -> List[Dict[str, str]]:
+        filtervals = []
+        for key, val in FILTER_VALS["Height"].items():
+            if self.is_dim_close_enough(dim_str=key, dim=height, fudge=fudge):
                 filtervals.append({"Id": val})
         return filtervals
 
@@ -1437,6 +1550,13 @@ class DigiKeyV4:
                 payload["FilterOptionsRequest"]["ManufacturerFilter"].append(
                     {"Id": MANUFACTURER_IDS[man]}
                 )
+        else:  # defaults to some reputable manufacturers
+            payload["FilterOptionsRequest"]["ManufacturerFilter"] = [
+                {"Id": MANUFACTURER_IDS["Nichicon"]},
+                {"Id": MANUFACTURER_IDS["Panasonic Electronic Components"]},
+                {"Id": MANUFACTURER_IDS["Rubycon"]},
+                {"Id": MANUFACTURER_IDS["Chemi-Con"]},
+            ]
 
         if "qty" in kwargs:
             payload["FilterOptionsRequest"]["MinimumQuantityAvailable"] = kwargs["qty"]
@@ -1464,13 +1584,26 @@ class DigiKeyV4:
         if "package" in kwargs:
             filter_vals = {
                 "ParameterId": PARAMETER_IDS["Package / Case"],
-                "FilterValues": [{"Id": FILTER_VALS["Package / Case"][kwargs["package"]]}],
+                "FilterValues": [],
             }
+            if kwargs["package"] == "A":
+                filter_vals["FilterValues"][
+                    {"Id": FILTER_VALS["Package / Case"]["Axial"]},
+                    {"Id": FILTER_VALS["Package / Case"]["Axial, Can"]},
+                ]
+            elif kwargs["package"] == "R":
+                filter_vals["FilterValues"][
+                    {"Id": FILTER_VALS["Package / Case"]["Radial"]},
+                    {"Id": FILTER_VALS["Package / Case"]["Radial, Can"]},
+                ]
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
             ].append(filter_vals)
 
-        filter_vals = {"ParameterId": PARAMETER_IDS["Mounting Type"], "FilterValues": []}
+        filter_vals = {
+            "ParameterId": PARAMETER_IDS["Mounting Type"],
+            "FilterValues": [],
+        }
         if "mounting" in kwargs:
             if kwargs["mounting"] == "SMD":
                 mounting = "Surface Mount"
@@ -1478,9 +1611,13 @@ class DigiKeyV4:
                 mounting = "Through Hole"
             else:
                 mounting = kwargs["mounting"]
-            filter_vals["FilterValues"] = [{"Id": FILTER_VALS["Mounting Type"][mounting]}]
-        else: # defaults to Through Hole
-            filter_vals["FilterValues"] = [{"Id": FILTER_VALS["Mounting Type"]["Through Hole"]}]
+            filter_vals["FilterValues"] = [
+                {"Id": FILTER_VALS["Mounting Type"][mounting]}
+            ]
+        else:  # defaults to Through Hole
+            filter_vals["FilterValues"] = [
+                {"Id": FILTER_VALS["Mounting Type"]["Through Hole"]}
+            ]
         payload["FilterOptionsRequest"]["ParameterFilterRequest"][
             "ParameterFilters"
         ].append(filter_vals)
@@ -1489,7 +1626,7 @@ class DigiKeyV4:
             if kwargs["polarization"] == "NP" or kwargs["polarization"] == "BP":
                 polarization = "Bi-Polar"
         else:
-            polarization = "Polar" # defaults to Polarized
+            polarization = "Polar"  # defaults to Polarized
         filter_vals = {
             "ParameterId": PARAMETER_IDS["Polarization"],
             "FilterValues": [{"Id": FILTER_VALS["Polarization"][polarization]}],
@@ -1498,49 +1635,42 @@ class DigiKeyV4:
             "ParameterFilters"
         ].append(filter_vals)
 
-        if "smd_land_size" in kwargs and len(kwargs["smd_land_size"]) > 0:
+        if "smd_land_size" in kwargs:
             filter_vals = {
                 "ParameterId": PARAMETER_IDS["SMD Land Size"],
                 "FilterValues": [],
             }
-            for smd in kwargs["smd_land_size"]:
-                filter_vals["FilterValues"].append(
-                    {"Id": FILTER_VALS["SMD Land Size"][smd]}
-                )
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
             ].append(filter_vals)
 
-        if "lead_spacing" in kwargs and len(kwargs["lead_spacing"]) > 0:
+        if "lead_spacing" in kwargs:
             filter_vals = {
                 "ParameterId": PARAMETER_IDS["Lead Spacing"],
-                "FilterValues": [],
+                "FilterValues": self.make_lead_spacing_filter(
+                    spacing=kwargs["lead_spacing"], fudge=fudge
+                ),
             }
-            for lead in kwargs["lead_spacing"]:
-                filter_vals["FilterValues"].append(
-                    {"Id": FILTER_VALS["Lead Spacing"][lead]}
-                )
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
             ].append(filter_vals)
 
-        if "height" in kwargs and len(kwargs["height"]) > 0:
-            filter_vals = {"ParameterId": PARAMETER_IDS["Height"], "FilterValues": []}
-            for h in kwargs["height"]:
-                filter_vals["FilterValues"].append({"Id": FILTER_VALS["Height"][h]})
+        if "height" in kwargs:
+            filter_vals = {
+                "ParameterId": PARAMETER_IDS["Height"],
+                "FilterValues": [
+                    self.make_height_filter(height=kwargs["height"], fudge=fudge)
+                ],
+            }
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
             ].append(filter_vals)
 
-        if "dimensions" in kwargs and len(kwargs["dimensions"]) > 0:
+        if "dimensions" in kwargs:
             filter_vals = {
                 "ParameterId": PARAMETER_IDS["Dimensions"],
                 "FilterValues": [],
             }
-            for dim in kwargs["dimensions"]:
-                filter_vals["FilterValues"].append(
-                    {"Id": FILTER_VALS["Dimensions"][dim]}
-                )
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
             ].append(filter_vals)
