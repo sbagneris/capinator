@@ -17,6 +17,7 @@ SEARCH_API = "/products/v4/search/keyword"
 CART_API = "/Ordering/v3/Cart/Items"
 CATEGORIES = "/products/v4/search/categories"
 
+
 class DigiKeyV4:
     def __init__(self):
         super().__init__()
@@ -31,7 +32,7 @@ class DigiKeyV4:
             token_url=f"{API_BASE}/v1/oauth2/token", client_secret=CLIENT_SECRET
         )
         return oauth
-    
+
     class Utils:
         def is_temp_in_range(self, range_str: str, temp: int, fudge: int = 0) -> bool:
             """
@@ -50,10 +51,12 @@ class DigiKeyV4:
                 )
 
             try:
-                lower = int(parts[0].strip()) - (int(parts[0].strip) * fudge) / 100
-                upper = int(parts[1].strip()) + (int(parts[1].strip) * fudge) / 100
+                lower = int(parts[0].strip()) - (int(parts[0].strip()) * fudge) / 100
+                upper = int(parts[1].strip()) + (int(parts[1].strip()) * fudge) / 100
             except ValueError as e:
-                raise ValueError("Failed to convert temperature values to integers.") from e
+                raise ValueError(
+                    "Failed to convert temperature values to integers."
+                ) from e
 
             return lower <= temp <= upper
 
@@ -89,7 +92,9 @@ class DigiKeyV4:
                 and temp_rating >= temp - (temp * fudge) / 100
             )
 
-        def is_dim_close_enough(self, dim_str: str, dim: float, fudge: int = 10) -> bool:
+        def is_dim_close_enough(
+            self, dim_str: str, dim: float, fudge: int = 10
+        ) -> bool:
             """
             Check if the given dimention string is close enough to the dimention value provided
             within a certain fudge factor (default 10%).
@@ -117,7 +122,9 @@ class DigiKeyV4:
 
             return percent_diff <= fudge
 
-        def are_dims_close_enough(self, dims_str: str, dims: Dict[str, float], fudge: int = 10) -> bool:
+        def are_dims_close_enough(
+            self, dims_str: str, dims: Dict[str, float], fudge: int = 10
+        ) -> bool:
             """
             Check if the given dimentions string is close enough to the dimention values provided
             within a certain fudge factor (default 10%).
@@ -133,37 +140,42 @@ class DigiKeyV4:
             :return: True if the provided dimention(s) is(are) within the fudge percentage of the dimentions in dims_str;
                     otherwise False.
             """
+            from libs.digikey_data import Regexes as r
             patterns = {
-                'dia': re.compile(r'^(\d+\.\d+)"\s*Dia\s*\((\d+\.\d+)mm\)$'),
-                'dia_len': re.compile(r'^(\d+\.\d+)"\s*Dia\s*x\s*(\d+\.\d+)"\s*L\s*\((\d+\.\d+)mm\s*x\s*(\d+\.\d+)mm\)$'),
-                'len_wid': re.compile(r'^(\d+\.\d+)"\s*L\s*x\s*(\d+\.\d+)"\s*W\s*\((\d+\.\d+)mm\s*x\s*(\d+\.\d+)mm\)$')
+                "dia": r.DIA,
+                "dia_len": r.DIA_LEN,
+                "len_wid": r.LEN_WID
             }
 
-            result = {'L': None, 'W': None}
+            dim_str_dict = {"L": None, "W": None}
 
-            for pat, regx in patterns:
-                match = re.match(dims_str, regx)
+            for pat, regx in patterns.items():
+                match = re.match(regx, dims_str)
                 if match:
-                    if pat == 'dia':
-                        result['W'] = float(match.group(2)) # Diameter is really just width.
-                    elif pat == 'dia_len':
-                        result['W'] = float(match.group(3))
-                        result['L'] = float(match.group(4))
-                    elif pat == 'len_wid':
-                        result['L'] = float(match.group(3))
-                        result['W'] = float(match.group(4))
+                    if pat == "dia":
+                        dim_str_dict["W"] = float(
+                            match.group(2)
+                        )  # Diameter is really just width.
+                    elif pat == "dia_len":
+                        dim_str_dict["W"] = float(match.group(3))
+                        dim_str_dict["L"] = float(match.group(4))
+                    elif pat == "len_wid":
+                        dim_str_dict["L"] = float(match.group(3))
+                        dim_str_dict["W"] = float(match.group(4))
                     break
 
-            for d in dims.keys():
-                if dims[d] is None:
+            for d in dim_str_dict.keys():
+                if dim_str_dict[d] is None:
                     continue
-                percent_diff = abs(result[d] - dims[d]) / result[d] * 100
+                percent_diff = abs(dim_str_dict[d] - dims[d]) / dim_str_dict[d] * 100
                 if percent_diff >= fudge:
                     return False
-                
+
             return True
 
-        def make_temperture_filter(self, temp: int, fudge: int = 0) -> List[Dict[str, str]]:
+        def make_temperture_filter(
+            self, temp: int, fudge: int = 0
+        ) -> List[Dict[str, str]]:
             filtervals = []
             for key, val in lytics.FILTER_VALS["Operating Temperature"].items():
                 if self.is_temp_in_range(range_str=key, temp=temp, fudge=fudge):
@@ -199,19 +211,25 @@ class DigiKeyV4:
                     filtervals.append({"Id": val})
             return filtervals
 
-        def make_dimension_filter(self, dims: str, dim_type: str, fudge: int = 10) -> List[Dict[str, str]]:
+        def make_dimension_filter(
+            self, dims: str, dim_type: str, fudge: int = 10
+        ) -> List[Dict[str, str]]:
             filtervals = []
 
-            dims_re = re.compile(r'^\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*$')
-            match = re.match(dims_re, dims)
+            from libs.digikey_data import Regexes as r
+            match = re.match(r.DIMS, dims)
             if match:
-                dims_dict = {'W': float(match.group(1)),
-                            'L': float(match.group(2)) if float(match.group(2)) > 0 else None }
+                dims_dict = {
+                    "W": float(match.group(1)),
+                    "L": float(match.group(2)) if float(match.group(2)) > 0 else None,
+                }
             else:
                 return filtervals
 
             for key, val in lytics.FILTER_VALS[dim_type].items():
-                if self.are_dims_close_enough(dims_str=key, dims=dims_dict, fudge=fudge):
+                if self.are_dims_close_enough(
+                    dims_str=key, dims=dims_dict, fudge=fudge
+                ):
                     filtervals.append({"Id": val})
             return filtervals
 
@@ -226,7 +244,7 @@ class DigiKeyV4:
         payload = {
             "Limit": 10,
             "FilterOptionsRequest": {
-                "ManufacturerFilter": [{"Id": "493"}, {"Id": "10"}, {"Id": "1189"}],
+                "ManufacturerFilter": [],
                 "CategoryFilter": [
                     {"Id": CATEGORY_IDS["Aluminum Electrolytic Capacitors"]}
                 ],
@@ -293,12 +311,12 @@ class DigiKeyV4:
                 "FilterValues": [],
             }
             if kwargs["package"] == "A":
-                filter_vals["FilterValues"][
+                filter_vals["FilterValues"] = [
                     {"Id": lytics.FILTER_VALS["Package / Case"]["Axial"]},
                     {"Id": lytics.FILTER_VALS["Package / Case"]["Axial, Can"]},
                 ]
             elif kwargs["package"] == "R":
-                filter_vals["FilterValues"][
+                filter_vals["FilterValues"] = [
                     {"Id": lytics.FILTER_VALS["Package / Case"]["Radial"]},
                     {"Id": lytics.FILTER_VALS["Package / Case"]["Radial, Can"]},
                 ]
@@ -344,7 +362,9 @@ class DigiKeyV4:
         if "smd_land_size" in kwargs:
             filter_vals = {
                 "ParameterId": lytics.PARAMETER_IDS["SMD Land Size"],
-                "FilterValues": [self.util.make_dimension_filter(dims=kwargs["dimentions"], dim_type="SMD Land Size", fudge=fudge)],
+                "FilterValues": self.util.make_dimension_filter(
+                    dims=kwargs["smd_land_size"], dim_type="SMD Land Size", fudge=fudge
+                ),
             }
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
@@ -354,7 +374,7 @@ class DigiKeyV4:
             filter_vals = {
                 "ParameterId": lytics.PARAMETER_IDS["Lead Spacing"],
                 "FilterValues": self.util.make_lead_spacing_filter(
-                    spacing=kwargs["lead_spacing"], fudge=fudge
+                    spacing=float(kwargs["lead_spacing"]), fudge=fudge
                 ),
             }
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
@@ -364,9 +384,9 @@ class DigiKeyV4:
         if "height" in kwargs:
             filter_vals = {
                 "ParameterId": lytics.PARAMETER_IDS["Height"],
-                "FilterValues": [
-                    self.util.make_height_filter(height=kwargs["height"], fudge=fudge)
-                ],
+                "FilterValues": self.util.make_height_filter(
+                    height=float(kwargs["height"]), fudge=fudge
+                ),
             }
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
@@ -375,7 +395,9 @@ class DigiKeyV4:
         if "dimensions" in kwargs:
             filter_vals = {
                 "ParameterId": lytics.PARAMETER_IDS["Dimensions"],
-                "FilterValues": [self.util.make_dimension_filter(dims=kwargs["dimentions"], dim_type="Dimentions", fudge=fudge)],
+                "FilterValues": self.util.make_dimension_filter(
+                    dims=kwargs["dimensions"], dim_type="Dimensions", fudge=fudge
+                ),
             }
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
@@ -399,7 +421,9 @@ class DigiKeyV4:
         if "temp" in kwargs:
             filter_vals = {
                 "ParameterId": lytics.PARAMETER_IDS["Operating Temperature"],
-                "FilterValues": self.util.make_temperture_filter(int(kwargs["temp"]), fudge),
+                "FilterValues": self.util.make_temperture_filter(
+                    int(kwargs["temp"]), fudge
+                ),
             }
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
@@ -407,7 +431,7 @@ class DigiKeyV4:
 
         return payload
 
-    def find_all_digikey_pn(self, params: Dict[str, str]) -> List[str]:
+    def find_all_digikey_pn(self, params: Dict[str, Any]) -> List[str]:
         """Find all matching Digi-Key part numbers"""
         data = self.make_payload(**params)
 
@@ -436,7 +460,7 @@ class DigiKeyV4:
     def find_digikey_pn(self, params: Dict[str, str]) -> str:
         """Find first matching Digi-Key part number"""
         params["limit"] = 1
-        return self.find_all_digikey_pn(params)[0]
+        return None if self.find_all_digikey_pn(params) is None else self.find_all_digikey_pn(params)[0]
 
     def add_to_cart(self, part_number, quantity=1):
         """Add item to Digi-Key cart"""

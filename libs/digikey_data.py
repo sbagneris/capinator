@@ -1,8 +1,23 @@
 # Various ID's scraped from DigiKey's search UI that the API needs for (very) fine grained querying.
 
+
+class Regexes:
+    from re import compile
+
+    DIA = compile(r'^(\d+\.\d+)"\s*Dia\s*\((\d+\.\d+)mm\)$')
+    DIA_LEN = compile(
+        r'^(\d+\.\d+)"\s*Dia\s*x\s*(\d+\.\d+)"\s*L\s*\((\d+\.\d+)mm\s*x\s*(\d+\.\d+)mm\)$'
+    )
+    LEN_WID = compile(
+        r'^(\d+\.\d+)"\s*L\s*x\s*(\d+\.\d+)"\s*W\s*\((\d+\.\d+)mm\s*x\s*(\d+\.\d+)mm\)$'
+    )
+    DIMS = compile(r"^\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*$")
+
+
 CATEGORY_IDS = {
     "Aluminum Electrolytic Capacitors": "58",
 }
+
 
 class ElectrolyticCapacitors:
     FILTER_VALS = {
@@ -1303,15 +1318,15 @@ class ElectrolyticCapacitors:
     }
 
     PARAMETER_IDS = {
-                "Capacitance": 2049,
-                "Voltage - Rated": 2079,
-                "Package / Case": 16,
-                "Mounting Type": 69,
-                "Polarization": 52,
-                "SMD Land Size": 884,
-                "Lead Spacing": 508,
-                "Height": 1500,
-                "Dimensions": 46,
-                "Lifetime @ Temp": 725,
-                "Operating Temperature": 252,
-            }
+        "Capacitance": 2049,
+        "Voltage - Rated": 2079,
+        "Package / Case": 16,
+        "Mounting Type": 69,
+        "Polarization": 52,
+        "SMD Land Size": 884,
+        "Lead Spacing": 508,
+        "Height": 1500,
+        "Dimensions": 46,
+        "Lifetime @ Temp": 725,
+        "Operating Temperature": 252,
+    }
