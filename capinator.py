@@ -5,35 +5,38 @@ import traceback
 import libs.digikey as dk
 
 def process_csv(file_path):
-    """Process CSV file and build cart"""
+    """Process CSV file"""
 
     api = dk.DigiKeyV4()
 
-    with open(file_path, newline="") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            try:
-                print(f"Processing: {row['capacitance']} uF {row['voltage']} V")
+    csvfile = open(file_path, newline="")
+    outfile = open('bulk.csv', mode = 'w')
+    reader = csv.DictReader(csvfile)
+    for row in reader:
+        try:
+            print(f"Processing: {row['capacitance']} uF {row['voltage']} V")
 
-                # Map CSV columns to API parameters
-                params = {}
-                for key in row.keys():
-                    if key in ['qty', 'capacitance', 'voltage'] and row[key] in [None, '']:
-                        raise Exception('Capacitor require qty + capacitance + voltage.')
-                
-                    if row[key] not in [None, '']:
-                        params[key] = row[key]
+            # Map CSV columns to API parameters
+            params = {}
+            for key in row.keys():
+                if key in ['qty', 'capacitance', 'voltage'] and row[key] in [None, '']:
+                    raise Exception('Capacitor require qty + capacitance + voltage.')
+            
+                if row[key] not in [None, '']:
+                    params[key] = row[key]
 
-                part_number = api.find_digikey_pn(params)
-                if part_number:
-                    print(f"Added {part_number} to cart")
-                else:
-                    print(f"No match found for {params}")
+            part_number = api.find_digikey_pn(params)
+            if part_number:
+                print(f"Found P/N: {part_number}")
+                outfile.write(f"{row['qty']}, {part_number}, {row['capacitance']}uF {row['voltage']}V\n")
+            else:
+                print(f"No match found for {params}")
 
-            except Exception as e:
-                print(f"Error processing row: {e}")
-                traceback.print_exc(file=sys.stdout)
-
+        except Exception as e:
+            print(f"Error processing row: {e}")
+            traceback.print_exc(file=sys.stdout)
+    outfile.close()
+    csvfile.close()
 
 if __name__ == "__main__":
     import sys
