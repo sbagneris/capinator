@@ -2,6 +2,7 @@
 import re
 from os import getenv
 from typing import Any, Dict, List
+from unittest import result
 from requests_oauthlib import OAuth2Session
 from oauthlib.oauth2 import BackendApplicationClient
 from libs.digikey_data import CATEGORY_IDS
@@ -431,8 +432,7 @@ class DigiKeyV4:
 
         return payload
 
-    def find_all_digikey_pn(self, params: Dict[str, Any]) -> List[str]:
-        """Find all matching Digi-Key part numbers"""
+    def make_query(self, params: Dict[str, Any]) -> List[str]:
         data = self.make_payload(**params)
 
         response = self.session.post(
@@ -444,21 +444,39 @@ class DigiKeyV4:
             json=data,
         )
         response.raise_for_status()
-        results = response.json()
+        return response.json()
 
-        if results.get("Products"):
-            if len(results["Products"]) == 0:
+    def find_all_digikey_pn(self, params: Dict[str, Any]) -> List[str]:
+        """Find all matching Digi-Key part numbers"""
+        
+        resp = self.make_query(params)
+        if resp.get("Products"):
+            if len(resp["Products"]) == 0:
                 return None
             else:
                 return [
-                    product["ManufacturerProductNumber"]
-                    for product in results["Products"]
+                    prod["ManufacturerProductNumber"]
+                    for prod in resp["Products"]
                 ]
 
         return None
 
+    def find_digikey_pn_by_moq(self, param: Dict[str, str]) -> str:
+        """Find first matching Digi-Key part number that meets MOQ for a given quantity"""
+        
+        resp = self.make_query(param)
+        if resp is None:
+            return None
+        else:
+            for prod in resp["Products"]:
+                for var in prod["ProductVariations"]:
+                    if int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
+                        return var["DigiKeyProductNumber"]
+            return None
+
     def find_digikey_pn(self, params: Dict[str, str]) -> str:
         """Find first matching Digi-Key part number"""
+
         params["limit"] = 1
         return None if self.find_all_digikey_pn(params) is None else self.find_all_digikey_pn(params)[0]
 

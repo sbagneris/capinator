@@ -25,7 +25,7 @@ def process_csv(file_path):
                 if row[key] not in [None, '']:
                     params[key] = row[key]
 
-            part_number = api.find_digikey_pn(params)
+            part_number = api.find_digikey_pn_by_moq(params)
             if part_number:
                 print(f"Found P/N: {part_number}")
                 outfile.write(f"{row['qty']}, {part_number}, {row['capacitance']}uF {row['voltage']}V\n")
