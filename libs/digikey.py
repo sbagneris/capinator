@@ -2,7 +2,6 @@
 import re
 from os import getenv
 from typing import Any, Dict, List
-from unittest import result
 from requests_oauthlib import OAuth2Session
 from oauthlib.oauth2 import BackendApplicationClient
 from libs.digikey_data import CATEGORY_IDS
@@ -461,9 +460,11 @@ class DigiKeyV4:
 
         return None
 
-    def find_digikey_pn_by_moq(self, param: Dict[str, str]) -> str:
+    def find_digikey_pn_by_moq(self, param: Dict[str, str], paginate: bool = True) -> str:
         """Find first matching Digi-Key part number that meets MOQ for a given quantity"""
-        
+
+        param["limit"] = 10
+        param["offset"] = 0
         resp = self.make_query(param)
         if resp is None:
             return None
@@ -472,6 +473,17 @@ class DigiKeyV4:
                 for var in prod["ProductVariations"]:
                     if int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
                         return var["DigiKeyProductNumber"]
+            if resp["ProductsCount"] > param["limit"] and paginate:
+                for offset in range(param["limit"], resp["ProductsCount"], param["limit"]):
+                    param["offset"] = offset
+                    resp = self.make_query(param)
+                    if resp is None:
+                        return None
+                    else:
+                        for prod in resp["Products"]:
+                            for var in prod["ProductVariations"]:
+                                if int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
+                                    return var["DigiKeyProductNumber"]
             return None
 
     def find_digikey_pn(self, params: Dict[str, str]) -> str:
