@@ -471,7 +471,7 @@ class DigiKeyV4:
         else:
             for prod in resp["Products"]:
                 for var in prod["ProductVariations"]:
-                    if int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
+                    if 1 <= int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
                         return var["DigiKeyProductNumber"]
             if resp["ProductsCount"] > param["limit"] and paginate:
                 for offset in range(param["limit"], resp["ProductsCount"], param["limit"]):
@@ -482,7 +482,7 @@ class DigiKeyV4:
                     else:
                         for prod in resp["Products"]:
                             for var in prod["ProductVariations"]:
-                                if int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
+                                if 1 <= int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
                                     return var["DigiKeyProductNumber"]
             return None
 
