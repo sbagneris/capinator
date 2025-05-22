@@ -320,6 +320,10 @@ class DigiKeyV4:
                     {"Id": lytics.FILTER_VALS["Package / Case"]["Radial"]},
                     {"Id": lytics.FILTER_VALS["Package / Case"]["Radial, Can"]},
                 ]
+            else:
+                filter_vals["FilterValues"] = [
+                    {"Id": lytics.FILTER_VALS["Package / Case"][kwargs["package"]]}
+                ]
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"
             ].append(filter_vals)
@@ -424,6 +428,17 @@ class DigiKeyV4:
                 "FilterValues": self.util.make_temperture_filter(
                     int(kwargs["temp"]), fudge
                 ),
+            }
+            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
+                "ParameterFilters"
+            ].append(filter_vals)
+
+        if "packaging" in kwargs:
+            filter_vals = {
+                "ParameterId": lytics.PARAMETER_IDS["Packaging"],
+                "FilterValues": [
+                    {"Id": lytics.FILTER_VALS["Packaging"][kwargs["packaging"]]}
+                ],
             }
             payload["FilterOptionsRequest"]["ParameterFilterRequest"][
                 "ParameterFilters"

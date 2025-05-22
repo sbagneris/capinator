@@ -1277,6 +1277,21 @@ class ElectrolyticCapacitors:
             "-20°C ~ 85°C": "139428",
             "20°C ~ 85°C": "139427",
         },
+        "Packaging": {
+            "Bag": "62",
+            "Box": "61",
+            "Bulk": "3",
+            "Case": "792",
+            "Cut Tape (CT)": "2",
+            "Digi-Reel®": "243",
+            "Retail Package": "804",
+            "Spool": "241",
+            "Strip": "250",
+            "Tape & Box (TB)": "4",
+            "Tape & Reel (TR)": "1",
+            "Tray": "17",
+            "Tube": "6",
+        },
     }
 
     MANUFACTURER_IDS = {
@@ -1329,4 +1344,5 @@ class ElectrolyticCapacitors:
         "Dimensions": 46,
         "Lifetime @ Temp": 725,
         "Operating Temperature": 252,
+        "Packaging": -5,
     }
