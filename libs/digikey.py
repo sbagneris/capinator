@@ -1,11 +1,11 @@
 # Description: Digikey API wrapper for searching capacitors
 import re
 from os import getenv
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from requests_oauthlib import OAuth2Session
 from oauthlib.oauth2 import BackendApplicationClient
 from libs.digikey_data import CATEGORY_IDS
-from libs.digikey_data import ElectrolyticCapacitors as lytics
+from facet_loader import get_facet_tables, broad_query_payload
 
 # Digi-Key API configuration
 API_BASE = "https://api.digikey.com"
@@ -17,13 +17,19 @@ SEARCH_API = "/products/v4/search/keyword"
 CART_API = "/Ordering/v3/Cart/Items"
 CATEGORIES = "/products/v4/search/categories"
 
+# Default reputable manufacturers, referenced by STABLE DigiKey vendor Id rather
+# than name: names drift (e.g. "Panasonic Electronic Components" is now
+# "Panasonic Industry"). Nichicon, Panasonic, Rubycon, Chemi-Con.
+DEFAULT_MANUFACTURER_IDS = [493, 10, 1189, 565]
+
 
 class DigiKeyV4:
     def __init__(self):
         super().__init__()
 
         self.session = self.authenticate()
-        self.util = self.Utils()
+        self.facets = self._load_facets()
+        self.util = self.Utils(self.facets)
 
     def authenticate(self) -> OAuth2Session:
         """Authenticate with Digi-Key API using OAuth2"""
@@ -33,7 +39,18 @@ class DigiKeyV4:
         )
         return oauth
 
+    def _load_facets(self):
+        """Load the parameter/value lookup tables from the disk cache, querying the
+        API only on a cold or expired cache (see facet_loader.get_facet_tables)."""
+        category = CATEGORY_IDS["Aluminum Electrolytic Capacitors"]
+        return get_facet_tables(
+            lambda: self._post_search(broad_query_payload(category))
+        )
+
     class Utils:
+        def __init__(self, facets):
+            self.facets = facets
+
         def is_temp_in_range(self, range_str: str, temp: int, fudge: int = 0) -> bool:
             """
             Check if the given temp value is within the temperature range described by range_str.
@@ -173,43 +190,55 @@ class DigiKeyV4:
 
             return True
 
+        def _select_facet_values(self, category, predicate) -> List[Dict[str, str]]:
+            """Return [{"Id": id}] for each value in `category` matched by
+            `predicate(value_name)`. Values the predicate can't parse are skipped:
+            dynamic facets may contain formats the strict parsers don't handle
+            (e.g. a bare '85°C' with no range), and one odd value must not abort
+            the whole query."""
+            filtervals = []
+            for name, vid in self.facets.FILTER_VALS[category].items():
+                try:
+                    matched = predicate(name)
+                except ValueError:
+                    continue
+                if matched:
+                    filtervals.append({"Id": vid})
+            return filtervals
+
         def make_temperture_filter(
             self, temp: int, fudge: int = 0
         ) -> List[Dict[str, str]]:
-            filtervals = []
-            for key, val in lytics.FILTER_VALS["Operating Temperature"].items():
-                if self.is_temp_in_range(range_str=key, temp=temp, fudge=fudge):
-                    filtervals.append({"Id": val})
-            return filtervals
+            return self._select_facet_values(
+                "Operating Temperature",
+                lambda name: self.is_temp_in_range(range_str=name, temp=temp, fudge=fudge),
+            )
 
         def make_lifetime_filter(
             self, lifetime: int, temp: int, fudge: int = 0
         ) -> List[Dict[str, str]]:
-            filtervals = []
-            for key, val in lytics.FILTER_VALS["Lifetime @ Temp"].items():
-                if self.does_rating_meets_lifetime_and_temp(
-                    rating_str=key, temp=temp, lifetime=lifetime, fudge=fudge
-                ):
-                    filtervals.append({"Id": val})
-            return filtervals
+            return self._select_facet_values(
+                "Lifetime @ Temp",
+                lambda name: self.does_rating_meets_lifetime_and_temp(
+                    rating_str=name, temp=temp, lifetime=lifetime, fudge=fudge
+                ),
+            )
 
         def make_lead_spacing_filter(
             self, spacing: float, fudge: int = 10
         ) -> List[Dict[str, str]]:
-            filtervals = []
-            for key, val in lytics.FILTER_VALS["Lead Spacing"].items():
-                if self.is_dim_close_enough(dim_str=key, dim=spacing, fudge=fudge):
-                    filtervals.append({"Id": val})
-            return filtervals
+            return self._select_facet_values(
+                "Lead Spacing",
+                lambda name: self.is_dim_close_enough(dim_str=name, dim=spacing, fudge=fudge),
+            )
 
         def make_height_filter(
             self, height: float, fudge: int = 10
         ) -> List[Dict[str, str]]:
-            filtervals = []
-            for key, val in lytics.FILTER_VALS["Height"].items():
-                if self.is_dim_close_enough(dim_str=key, dim=height, fudge=fudge):
-                    filtervals.append({"Id": val})
-            return filtervals
+            return self._select_facet_values(
+                "Height",
+                lambda name: self.is_dim_close_enough(dim_str=name, dim=height, fudge=fudge),
+            )
 
         def make_dimension_filter(
             self, dims: str, dim_type: str, fudge: int = 10
@@ -226,230 +255,199 @@ class DigiKeyV4:
             else:
                 return filtervals
 
-            for key, val in lytics.FILTER_VALS[dim_type].items():
+            for key, val in self.facets.FILTER_VALS[dim_type].items():
                 if self.are_dims_close_enough(
                     dims_str=key, dims=dims_dict, fudge=fudge
                 ):
                     filtervals.append({"Id": val})
             return filtervals
 
-    def make_payload(self, **kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    def make_payload(self, **kwargs: Any) -> Dict[str, Any]:
         """Create a payload for the Digi-Key search API"""
 
-        if "fudge" in kwargs:
-            fudge = int(kwargs["fudge"])
-        else:
-            fudge = 0
+        fudge = int(kwargs.get("fudge", 0))
+        category_id = CATEGORY_IDS["Aluminum Electrolytic Capacitors"]
 
         payload = {
             "Limit": 10,
             "FilterOptionsRequest": {
                 "ManufacturerFilter": [],
-                "CategoryFilter": [
-                    {"Id": CATEGORY_IDS["Aluminum Electrolytic Capacitors"]}
-                ],
+                "CategoryFilter": [{"Id": category_id}],
                 "MarketPlaceFilter": "ExcludeMarketPlace",
                 "MinimumQuantityAvailable": 1,
                 "ParameterFilterRequest": {
-                    "CategoryFilter": {
-                        "Id": CATEGORY_IDS["Aluminum Electrolytic Capacitors"]
-                    },
+                    "CategoryFilter": {"Id": category_id},
                     "ParameterFilters": [],
                 },
                 "SearchOptions": ["InStock"],
             },
             "SortOptions": {"Field": "Price", "SortOrder": "Ascending"},
         }
+        # Bind the nested request objects the filter blocks below repeatedly mutate.
+        filter_req = payload["FilterOptionsRequest"]
+        param_filters = filter_req["ParameterFilterRequest"]["ParameterFilters"]
 
-        if "keywords" in kwargs and len(kwargs["keywords"]) > 0:
-            for kw in kwargs["keywords"]:
-                payload["Keywords"] += kw + " "
+        if kwargs.get("keywords"):
+            kw = kwargs["keywords"]
+            payload["Keywords"] = kw if isinstance(kw, str) else " ".join(kw)
 
         if "limit" in kwargs:
-            payload["Limit"] = kwargs["limit"]
+            payload["Limit"] = int(kwargs["limit"])
 
-        if "manufacturers" in kwargs and len(kwargs["manufacturers"]) > 0:
-            payload["FilterOptionsRequest"]["ManufacturerFilter"] = []
-            for man in kwargs["manufacturers"]:
-                payload["FilterOptionsRequest"]["ManufacturerFilter"].append(
-                    {"Id": lytics.MANUFACTURER_IDS[man]}
-                )
-        else:  # defaults to some reputable manufacturers
-            payload["FilterOptionsRequest"]["ManufacturerFilter"] = [
-                {"Id": lytics.MANUFACTURER_IDS["Nichicon"]},
-                {"Id": lytics.MANUFACTURER_IDS["Panasonic Electronic Components"]},
-                {"Id": lytics.MANUFACTURER_IDS["Rubycon"]},
-                {"Id": lytics.MANUFACTURER_IDS["Chemi-Con"]},
+        if "offset" in kwargs:  # pagination: Offset is a top-level request field
+            payload["Offset"] = int(kwargs["offset"])
+
+        if kwargs.get("manufacturers"):
+            filter_req["ManufacturerFilter"] = [
+                {"Id": self.facets.MANUFACTURER_IDS[man]}
+                for man in kwargs["manufacturers"]
+            ]
+        else:  # defaults to some reputable manufacturers (by stable vendor Id)
+            filter_req["ManufacturerFilter"] = [
+                {"Id": mid} for mid in DEFAULT_MANUFACTURER_IDS
             ]
 
         if "qty" in kwargs:
-            payload["FilterOptionsRequest"]["MinimumQuantityAvailable"] = kwargs["qty"]
+            filter_req["MinimumQuantityAvailable"] = int(kwargs["qty"])
 
         if "capacitance" in kwargs:
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(
+            param_filters.append(
                 {
-                    "ParameterId": lytics.PARAMETER_IDS["Capacitance"],
+                    "ParameterId": self.facets.PARAMETER_IDS["Capacitance"],
                     "FilterValues": [{"Id": str(kwargs["capacitance"]) + " uF"}],
                 }
             )
 
         if "voltage" in kwargs:
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(
+            param_filters.append(
                 {
-                    "ParameterId": lytics.PARAMETER_IDS["Voltage - Rated"],
+                    "ParameterId": self.facets.PARAMETER_IDS["Voltage - Rated"],
                     "FilterValues": [{"Id": str(kwargs["voltage"]) + " V"}],
                 }
             )
 
         if "package" in kwargs:
-            filter_vals = {
-                "ParameterId": lytics.PARAMETER_IDS["Package / Case"],
-                "FilterValues": [],
-            }
+            package_vals = self.facets.FILTER_VALS["Package / Case"]
             if kwargs["package"] == "A":
-                filter_vals["FilterValues"] = [
-                    {"Id": lytics.FILTER_VALS["Package / Case"]["Axial"]},
-                    {"Id": lytics.FILTER_VALS["Package / Case"]["Axial, Can"]},
+                filter_values = [
+                    {"Id": package_vals["Axial"]},
+                    {"Id": package_vals["Axial, Can"]},
                 ]
             elif kwargs["package"] == "R":
-                filter_vals["FilterValues"] = [
-                    {"Id": lytics.FILTER_VALS["Package / Case"]["Radial"]},
-                    {"Id": lytics.FILTER_VALS["Package / Case"]["Radial, Can"]},
+                filter_values = [
+                    {"Id": package_vals["Radial"]},
+                    {"Id": package_vals["Radial, Can"]},
                 ]
             else:
-                filter_vals["FilterValues"] = [
-                    {"Id": lytics.FILTER_VALS["Package / Case"][kwargs["package"]]}
-                ]
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(filter_vals)
+                filter_values = [{"Id": package_vals[kwargs["package"]]}]
+            param_filters.append(
+                {
+                    "ParameterId": self.facets.PARAMETER_IDS["Package / Case"],
+                    "FilterValues": filter_values,
+                }
+            )
 
-        filter_vals = {
-            "ParameterId": lytics.PARAMETER_IDS["Mounting Type"],
-            "FilterValues": [],
-        }
-        if "mounting" in kwargs:
-            if kwargs["mounting"] == "SMD":
-                mounting = "Surface Mount"
-            elif kwargs["mounting"] == "THT":
-                mounting = "Through Hole"
-            else:
-                mounting = kwargs["mounting"]
-            filter_vals["FilterValues"] = [
-                {"Id": lytics.FILTER_VALS["Mounting Type"][mounting]}
-            ]
-        else:  # defaults to Through Hole
-            filter_vals["FilterValues"] = [
-                {"Id": lytics.FILTER_VALS["Mounting Type"]["Through Hole"]}
-            ]
-        payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-            "ParameterFilters"
-        ].append(filter_vals)
-
-        if "polarization" in kwargs:
-            if kwargs["polarization"] == "NP" or kwargs["polarization"] == "BP":
-                polarization = "Bi-Polar"
-        else:
-            polarization = "Polar"  # defaults to Polarized
-        filter_vals = {
-            "ParameterId": lytics.PARAMETER_IDS["Polarization"],
-            "FilterValues": [{"Id": lytics.FILTER_VALS["Polarization"][polarization]}],
-        }
-        payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-            "ParameterFilters"
-        ].append(filter_vals)
-
-        if "smd_land_size" in kwargs:
-            filter_vals = {
-                "ParameterId": lytics.PARAMETER_IDS["SMD Land Size"],
-                "FilterValues": self.util.make_dimension_filter(
-                    dims=kwargs["smd_land_size"], dim_type="SMD Land Size", fudge=fudge
-                ),
-            }
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(filter_vals)
-
-        if "lead_spacing" in kwargs:
-            filter_vals = {
-                "ParameterId": lytics.PARAMETER_IDS["Lead Spacing"],
-                "FilterValues": self.util.make_lead_spacing_filter(
-                    spacing=float(kwargs["lead_spacing"]), fudge=fudge
-                ),
-            }
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(filter_vals)
-
-        if "height" in kwargs:
-            filter_vals = {
-                "ParameterId": lytics.PARAMETER_IDS["Height"],
-                "FilterValues": self.util.make_height_filter(
-                    height=float(kwargs["height"]), fudge=fudge
-                ),
-            }
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(filter_vals)
-
-        if "dimensions" in kwargs:
-            filter_vals = {
-                "ParameterId": lytics.PARAMETER_IDS["Dimensions"],
-                "FilterValues": self.util.make_dimension_filter(
-                    dims=kwargs["dimensions"], dim_type="Dimensions", fudge=fudge
-                ),
-            }
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(filter_vals)
-
-        if "lifetime" in kwargs:
-            if "temp" in kwargs:
-                temp = int(kwargs["temp"])
-            else:
-                temp = 85
-            filter_vals = {
-                "ParameterId": lytics.PARAMETER_IDS["Lifetime @ Temp"],
-                "FilterValues": self.util.make_lifetime_filter(
-                    int(kwargs["lifetime"]), temp, fudge
-                ),
-            }
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(filter_vals)
-
-        if "temp" in kwargs:
-            filter_vals = {
-                "ParameterId": lytics.PARAMETER_IDS["Operating Temperature"],
-                "FilterValues": self.util.make_temperture_filter(
-                    int(kwargs["temp"]), fudge
-                ),
-            }
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(filter_vals)
-
-        if "packaging" in kwargs:
-            filter_vals = {
-                "ParameterId": lytics.PARAMETER_IDS["Packaging"],
+        # Mounting defaults to Through Hole; SMD/THT are aliases for the facet names.
+        mounting_aliases = {"SMD": "Surface Mount", "THT": "Through Hole"}
+        mounting = kwargs.get("mounting", "Through Hole")
+        mounting = mounting_aliases.get(mounting, mounting)
+        param_filters.append(
+            {
+                "ParameterId": self.facets.PARAMETER_IDS["Mounting Type"],
                 "FilterValues": [
-                    {"Id": lytics.FILTER_VALS["Packaging"][kwargs["packaging"]]}
+                    {"Id": self.facets.FILTER_VALS["Mounting Type"][mounting]}
                 ],
             }
-            payload["FilterOptionsRequest"]["ParameterFilterRequest"][
-                "ParameterFilters"
-            ].append(filter_vals)
+        )
+
+        if kwargs.get("polarization") in ("NP", "BP"):
+            polarization = "Bi-Polar"
+        else:
+            polarization = "Polar"  # defaults to Polarized (also when absent)
+        param_filters.append(
+            {
+                "ParameterId": self.facets.PARAMETER_IDS["Polarization"],
+                "FilterValues": [
+                    {"Id": self.facets.FILTER_VALS["Polarization"][polarization]}
+                ],
+            }
+        )
+
+        if "smd_land_size" in kwargs:
+            param_filters.append(
+                {
+                    "ParameterId": self.facets.PARAMETER_IDS["SMD Land Size"],
+                    "FilterValues": self.util.make_dimension_filter(
+                        dims=kwargs["smd_land_size"], dim_type="SMD Land Size", fudge=fudge
+                    ),
+                }
+            )
+
+        if "lead_spacing" in kwargs:
+            param_filters.append(
+                {
+                    "ParameterId": self.facets.PARAMETER_IDS["Lead Spacing"],
+                    "FilterValues": self.util.make_lead_spacing_filter(
+                        spacing=float(kwargs["lead_spacing"]), fudge=fudge
+                    ),
+                }
+            )
+
+        if "height" in kwargs:
+            param_filters.append(
+                {
+                    "ParameterId": self.facets.PARAMETER_IDS["Height"],
+                    "FilterValues": self.util.make_height_filter(
+                        height=float(kwargs["height"]), fudge=fudge
+                    ),
+                }
+            )
+
+        if "dimensions" in kwargs:
+            param_filters.append(
+                {
+                    "ParameterId": self.facets.PARAMETER_IDS["Dimensions"],
+                    "FilterValues": self.util.make_dimension_filter(
+                        dims=kwargs["dimensions"], dim_type="Dimensions", fudge=fudge
+                    ),
+                }
+            )
+
+        if "lifetime" in kwargs:
+            temp = int(kwargs["temp"]) if "temp" in kwargs else 85
+            param_filters.append(
+                {
+                    "ParameterId": self.facets.PARAMETER_IDS["Lifetime @ Temp"],
+                    "FilterValues": self.util.make_lifetime_filter(
+                        int(kwargs["lifetime"]), temp, fudge
+                    ),
+                }
+            )
+
+        if "temp" in kwargs:
+            param_filters.append(
+                {
+                    "ParameterId": self.facets.PARAMETER_IDS["Operating Temperature"],
+                    "FilterValues": self.util.make_temperture_filter(
+                        int(kwargs["temp"]), fudge
+                    ),
+                }
+            )
+
+        if "packaging" in kwargs:
+            # Packaging is a top-level facet group (like ManufacturerFilter), NOT a
+            # parametric filter, so it goes in its own PackagingFilter field with an
+            # integer Id. The old "-5" was the MUI UI group id (filter-box-group--5),
+            # not an API ParameterId, and matched zero products.
+            filter_req["PackagingFilter"] = [
+                {"Id": int(self.facets.FILTER_VALS["Packaging"][kwargs["packaging"]])}
+            ]
 
         return payload
 
-    def make_query(self, params: Dict[str, Any]) -> List[str]:
-        data = self.make_payload(**params)
-
-        response = self.session.post(
+    def _do_post(self, data: Dict[str, Any]):
+        """Single POST to the keyword search endpoint with the current token."""
+        return self.session.post(
             url=f"{API_BASE}{SEARCH_API}",
             headers={
                 "X-DIGIKEY-Client-Id": CLIENT_ID,
@@ -457,55 +455,66 @@ class DigiKeyV4:
             },
             json=data,
         )
+
+    def _post_search(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """POST a prebuilt payload to the keyword search endpoint and return JSON.
+
+        Client-credentials tokens expire (~30 min) and have no refresh token, so on
+        a 401 we re-authenticate once and retry — this keeps long bulk CSV runs from
+        dying mid-way."""
+        response = self._do_post(data)
+        if response.status_code == 401:  # token expired: re-auth once and retry
+            self.session = self.authenticate()
+            response = self._do_post(data)
         response.raise_for_status()
         return response.json()
 
-    def find_all_digikey_pn(self, params: Dict[str, Any]) -> List[str]:
+    def make_query(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        return self._post_search(self.make_payload(**params))
+
+    def find_all_digikey_pn(self, params: Dict[str, Any]) -> Optional[List[str]]:
         """Find all matching Digi-Key part numbers"""
-        
+
         resp = self.make_query(params)
         if resp.get("Products"):
-            if len(resp["Products"]) == 0:
-                return None
-            else:
-                return [
-                    prod["ManufacturerProductNumber"]
-                    for prod in resp["Products"]
-                ]
-
+            return [prod["ManufacturerProductNumber"] for prod in resp["Products"]]
         return None
 
-    def find_digikey_pn_by_moq(self, param: Dict[str, str], paginate: bool = True) -> str:
+    @staticmethod
+    def _first_pn_meeting_moq(resp: Dict[str, Any], qty: int) -> Optional[str]:
+        """Return the first variation's DigiKey P/N whose MOQ is in [1, qty], else None."""
+        for prod in resp.get("Products", []):
+            for var in prod.get("ProductVariations", []):
+                if 1 <= int(var["MinimumOrderQuantity"]) <= qty:
+                    return var["DigiKeyProductNumber"]
+        return None
+
+    def find_digikey_pn_by_moq(self, param: Dict[str, Any], paginate: bool = True) -> Optional[str]:
         """Find first matching Digi-Key part number that meets MOQ for a given quantity"""
 
-        param["limit"] = 10
+        page = 50  # v4 max page size: fewer (rate-limited) queries when paginating
+        qty = int(param["qty"])
+        param["limit"] = page
         param["offset"] = 0
         resp = self.make_query(param)
-        if resp is None:
-            return None
-        else:
-            for prod in resp["Products"]:
-                for var in prod["ProductVariations"]:
-                    if 1 <= int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
-                        return var["DigiKeyProductNumber"]
-            if resp["ProductsCount"] > param["limit"] and paginate:
-                for offset in range(param["limit"], resp["ProductsCount"], param["limit"]):
-                    param["offset"] = offset
-                    resp = self.make_query(param)
-                    if resp is None:
-                        return None
-                    else:
-                        for prod in resp["Products"]:
-                            for var in prod["ProductVariations"]:
-                                if 1 <= int(var["MinimumOrderQuantity"]) <= int(param["qty"]):
-                                    return var["DigiKeyProductNumber"]
-            return None
 
-    def find_digikey_pn(self, params: Dict[str, str]) -> str:
+        match = self._first_pn_meeting_moq(resp, qty)
+        if match or not paginate:
+            return match
+
+        for offset in range(page, resp["ProductsCount"], page):
+            param["offset"] = offset
+            match = self._first_pn_meeting_moq(self.make_query(param), qty)
+            if match:
+                return match
+        return None
+
+    def find_digikey_pn(self, params: Dict[str, Any]) -> Optional[str]:
         """Find first matching Digi-Key part number"""
 
         params["limit"] = 1
-        return None if self.find_all_digikey_pn(params) is None else self.find_all_digikey_pn(params)[0]
+        results = self.find_all_digikey_pn(params)
+        return results[0] if results else None
 
     def add_to_cart(self, part_number, quantity=1):
         """Add item to Digi-Key cart"""
