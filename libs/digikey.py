@@ -33,9 +33,14 @@ class DigiKeyV4:
 
     def authenticate(self) -> OAuth2Session:
         """Authenticate with Digi-Key API using OAuth2"""
-        oauth = OAuth2Session(client=BackendApplicationClient(client_id=CLIENT_ID))
+        client_id, client_secret = CLIENT_ID, CLIENT_SECRET
+        if not client_id or not client_secret:
+            raise RuntimeError(
+                "Set DIGIKEY_CLIENT_ID and DIGIKEY_CLIENT_SECRET (see secrets.sh)."
+            )
+        oauth = OAuth2Session(client=BackendApplicationClient(client_id=client_id))
         oauth.fetch_token(
-            token_url=f"{API_BASE}/v1/oauth2/token", client_secret=CLIENT_SECRET
+            token_url=f"{API_BASE}/v1/oauth2/token", client_secret=client_secret
         )
         return oauth
 
@@ -164,7 +169,7 @@ class DigiKeyV4:
                 "len_wid": r.LEN_WID
             }
 
-            dim_str_dict = {"L": None, "W": None}
+            dim_str_dict: Dict[str, Optional[float]] = {"L": None, "W": None}
 
             for pat, regx in patterns.items():
                 match = re.match(regx, dims_str)
@@ -181,10 +186,10 @@ class DigiKeyV4:
                         dim_str_dict["W"] = float(match.group(4))
                     break
 
-            for d in dim_str_dict.keys():
-                if dim_str_dict[d] is None:
+            for d, parsed in dim_str_dict.items():
+                if parsed is None:
                     continue
-                percent_diff = abs(dim_str_dict[d] - dims[d]) / dim_str_dict[d] * 100
+                percent_diff = abs(parsed - dims[d]) / parsed * 100
                 if percent_diff >= fudge:
                     return False
 
