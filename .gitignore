@@ -6,3 +6,10 @@ util/ext_*
 ext_*
 *.sh
 
+# Generated facet lookup cache (rebuilt from the API on a cold/expired cache)
+facet_cache.json
+
+# Test / Python caches
+__pycache__/
+.pytest_cache/
+
