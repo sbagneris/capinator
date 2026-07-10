@@ -22,7 +22,7 @@ export DIGIKEY_CLIENT_SECRET=...
 ## Usage
 
 ```bash
-./capinator.py input.csv
+python -m capinator.cli input.csv
 ```
 
 Reads `input.csv` and writes matched part numbers to `bulk.csv`
@@ -76,12 +76,52 @@ Tests are **hermetic** — no network or credentials required. Run a single test
 python -m pytest tests/test_filters.py::test_is_temp_in_range_within
 ```
 
+## Web app
+
+A multi-user web front-end wraps the same resolver: paste a CSV list, get the resolved
+bulk-order lines back, and (when registered) save/curate lists and regenerate them.
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+export DIGIKEY_CLIENT_ID=...  DIGIKEY_CLIENT_SECRET=...  SECRET_KEY=$(openssl rand -hex 32)
+.venv/bin/uvicorn webapp.main:app --workers 1        # http://127.0.0.1:8000
+```
+
+Key points:
+
+- **One process, one worker.** A single background **thread** runs jobs one at a time —
+  this serialization is the DigiKey rate-limit throttle. Always run with **`--workers 1`**;
+  more uvicorn workers would spawn parallel threads that race the shared API key.
+- **Rate-limit aware.** Every response's `X-RateLimit-*` headers are captured; the header
+  badge shows remaining daily quota and the worker pauses when it runs low.
+- **Guests** get a small daily job limit (`GUEST_JOB_LIMIT`); registering lifts it and
+  lets you save lists.
+
+### Component-list catalog (seed file)
+
+Saved lists live in the SQL DB, but the **durable source of truth is a committed YAML
+file** (`seed/component_lists.yaml`) — this survives Render's ephemeral disk, which resets
+the SQLite DB on every deploy. On startup the app auto-seeds from that file. To persist
+changes made in the app: an admin opens **`/admin`**, clicks **Export**, and commits the
+downloaded YAML. (There's no shell on the Render free tier, so export/import is UI-driven.)
+
+### Deployment (Render free tier)
+
+`render.yaml` describes a single free web service. The SQLite DB is ephemeral; for durable
+live writes set `DATABASE_URL` to a Postgres instance (schema via `alembic upgrade head` —
+SQLite→Postgres is just a URL change).
+
 ## Layout
 
 | path | purpose |
 |------|---------|
-| `capinator.py` | CLI entry point (CSV in → `bulk.csv` out) |
-| `libs/digikey.py` | DigiKey v4 API client, request building, spec parsers |
-| `facet_loader.py` | builds & disk-caches filter lookup tables from API responses |
-| `libs/digikey_data.py` | filter regexes + category IDs |
-| `tests/` | pytest suite |
+| `capinator/cli.py` | CLI entry point (`python -m capinator.cli <csv>` → `bulk.csv`) |
+| `capinator/bom.py` | CSV parse/build/round-trip, decoupled from I/O (shared by CLI + web) |
+| `capinator/resolvers.py` | resolver protocol + registry (capacitor resolver for the MVP) |
+| `capinator/digikey.py` | DigiKey v4 API client, request building, spec parsers |
+| `capinator/facet_loader.py` | builds & disk-caches filter lookup tables from API responses |
+| `capinator/digikey_data.py` | filter regexes + category IDs |
+| `webapp/` | FastAPI app: models, worker, routers, templates, seed import/export |
+| `seed/component_lists.yaml` | durable, committed component-list catalog |
+| `alembic/` | database migrations (SQLite dev → Postgres prod) |
+| `tests/` | pytest suite (hermetic; no network/credentials) |

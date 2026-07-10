@@ -1,0 +1,22 @@
+# Render deployment (free tier: one web service, no separate worker, ephemeral disk).
+# The background worker runs as a daemon thread inside this single process, so the start
+# command MUST pin --workers 1 (multiple workers would race the shared DigiKey key).
+services:
+  - type: web
+    name: capinator
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn webapp.main:app --host 0.0.0.0 --port $PORT --workers 1
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DIGIKEY_CLIENT_ID
+        sync: false
+      - key: DIGIKEY_CLIENT_SECRET
+        sync: false
+      - key: SEED_OWNER_EMAIL
+        sync: false        # also the default admin (ADMIN_EMAILS)
+      # Optional: point at durable Postgres instead of ephemeral SQLite
+      # - key: DATABASE_URL
+      #   sync: false

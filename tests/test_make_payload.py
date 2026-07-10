@@ -1,6 +1,6 @@
 """Tests for make_payload — guards the payload-shaping bugs fixed this session
 (packaging, polarization, default manufacturers, offset, keywords)."""
-import libs.digikey as dk
+import capinator.digikey as dk
 
 
 def _param_filters(payload):

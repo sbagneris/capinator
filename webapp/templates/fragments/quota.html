@@ -1,0 +1,11 @@
+{% if q.rate_limit_remaining is none %}
+  <span class="quota unknown" title="No job has run yet">DigiKey: unknown</span>
+{% else %}
+  <span class="quota {% if q.backing_off %}paused{% elif q.rate_limit_remaining <= 20 %}low{% endif %}">
+    DigiKey: {{ q.rate_limit_remaining }}{% if q.rate_limit_limit %}/{{ q.rate_limit_limit }}{% endif %} left
+    {%- if q.backing_off %} — paused, resets soon{% endif %}
+  </span>
+{% endif %}
+{% if q.queued or q.running %}
+  <span class="qdepth">· {{ q.queued }} queued, {{ q.running }} running</span>
+{% endif %}

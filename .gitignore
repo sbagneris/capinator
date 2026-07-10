@@ -9,6 +9,17 @@ ext_*
 # Generated facet lookup cache (rebuilt from the API on a cold/expired cache)
 facet_cache.json
 
+# Local SQLite DB (ephemeral working copy; the catalog's source of truth is the
+# committed seed/component_lists.yaml)
+*.db
+capinator.db
+
+# Local environment overrides
+.env
+
+# CLI output
+bulk.csv
+
 # Test / Python caches
 __pycache__/
 .pytest_cache/

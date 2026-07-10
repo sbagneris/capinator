@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from facet_loader import FacetTables, get_facet_tables, load_facets
+from capinator.facet_loader import FacetTables, get_facet_tables, load_facets
 
 
 def counting_fetch(response):

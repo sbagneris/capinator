@@ -1,0 +1,20 @@
+# Runtime dependencies for capinator (CLI + web app).
+# Install:  python -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+# --- DigiKey client (CLI + resolver) ---
+requests
+requests-oauthlib
+oauthlib
+
+# --- Web app ---
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+sqlalchemy>=2
+alembic
+passlib[bcrypt]
+bcrypt<4.1  # passlib 1.7.x reads bcrypt.__about__, removed in bcrypt 4.1
+itsdangerous
+pydantic-settings
+pyyaml

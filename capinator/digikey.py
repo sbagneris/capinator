@@ -4,8 +4,8 @@ from os import getenv
 from typing import Any, Dict, List, Optional
 from requests_oauthlib import OAuth2Session
 from oauthlib.oauth2 import BackendApplicationClient
-from libs.digikey_data import CATEGORY_IDS
-from facet_loader import get_facet_tables, broad_query_payload
+from capinator.digikey_data import CATEGORY_IDS
+from capinator.facet_loader import get_facet_tables, broad_query_payload
 
 # Digi-Key API configuration
 API_BASE = "https://api.digikey.com"
@@ -26,6 +26,13 @@ DEFAULT_MANUFACTURER_IDS = [493, 10, 1189, 565]
 class DigiKeyV4:
     def __init__(self):
         super().__init__()
+
+        # Rate-limit / usage instrumentation. Initialized before _load_facets(), which
+        # may itself POST on a cold facet cache. call_count counts real HTTP POSTs;
+        # rate_limit_* mirror the latest X-RateLimit-* response headers.
+        self.call_count = 0
+        self.rate_limit_limit = 0
+        self.rate_limit_remaining = None
 
         self.session = self.authenticate()
         self.facets = self._load_facets()
@@ -162,7 +169,7 @@ class DigiKeyV4:
             :return: True if the provided dimention(s) is(are) within the fudge percentage of the dimentions in dims_str;
                     otherwise False.
             """
-            from libs.digikey_data import Regexes as r
+            from capinator.digikey_data import Regexes as r
             patterns = {
                 "dia": r.DIA,
                 "dia_len": r.DIA_LEN,
@@ -250,7 +257,7 @@ class DigiKeyV4:
         ) -> List[Dict[str, str]]:
             filtervals = []
 
-            from libs.digikey_data import Regexes as r
+            from capinator.digikey_data import Regexes as r
             match = re.match(r.DIMS, dims)
             if match:
                 dims_dict = {
@@ -451,8 +458,11 @@ class DigiKeyV4:
         return payload
 
     def _do_post(self, data: Dict[str, Any]):
-        """Single POST to the keyword search endpoint with the current token."""
-        return self.session.post(
+        """Single POST to the keyword search endpoint with the current token.
+
+        Every real POST (incl. the 401 retry) is counted and its X-RateLimit-* headers
+        captured, so callers can budget against the shared key's daily quota."""
+        response = self.session.post(
             url=f"{API_BASE}{SEARCH_API}",
             headers={
                 "X-DIGIKEY-Client-Id": CLIENT_ID,
@@ -460,6 +470,26 @@ class DigiKeyV4:
             },
             json=data,
         )
+        self.call_count += 1
+        self._capture_rate_limit(response)
+        return response
+
+    def _capture_rate_limit(self, response) -> None:
+        """Read DigiKey's X-RateLimit-Limit / X-RateLimit-Remaining (present on every
+        response) into the client. Missing/garbled headers are ignored, not fatal."""
+        headers = getattr(response, "headers", None) or {}
+        limit = headers.get("X-RateLimit-Limit")
+        remaining = headers.get("X-RateLimit-Remaining")
+        if limit is not None:
+            try:
+                self.rate_limit_limit = int(limit)
+            except (TypeError, ValueError):
+                pass
+        if remaining is not None:
+            try:
+                self.rate_limit_remaining = int(remaining)
+            except (TypeError, ValueError):
+                pass
 
     def _post_search(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """POST a prebuilt payload to the keyword search endpoint and return JSON.
