@@ -1,6 +1,6 @@
 """Tests for capinator.bom: CSV parsing, CSV round-trip, and BOM building against a
 fake DigiKey client (no network)."""
-from capinator.bom import BomResult, build_bom, parse_spec, to_csv
+from capinator.bom import build_bom, parse_spec, to_csv
 
 CSV = (
     "qty,capacitance,voltage,mounting,package,packaging,fudge,\n"

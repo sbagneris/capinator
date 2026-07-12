@@ -10,14 +10,12 @@ from capinator.resolvers import DEFAULT_COMPONENT_TYPE, get_resolver
 from webapp.auth import current_user, get_or_create_guest_id
 from webapp.config import settings
 from webapp.db import get_db
-from webapp.models import ComponentList, Job, Resolution, User, utcnow
-from webapp.services import create_job, ensure_resolution, guest_jobs_last_24h
+from webapp.models import ComponentList, Job, Resolution, User
+from webapp.services import create_job, ensure_resolution, guest_over_limit
 from webapp.templating import render
 from webapp.worker import quota_snapshot
 
 router = APIRouter()
-
-_META_FIELDS = ("name", "device_make", "device_model", "board_reference", "notes")
 
 
 def _meta_key(job_id: int) -> str:
@@ -71,7 +69,7 @@ def create_job_endpoint(
     guest_id = None
     if user is None:
         guest_id = get_or_create_guest_id(request)
-        if guest_jobs_last_24h(db, guest_id) >= settings.guest_job_limit:
+        if guest_over_limit(db, guest_id):
             return render(
                 "fragments/guest_limit.html",
                 {"request": request, "limit": settings.guest_job_limit},

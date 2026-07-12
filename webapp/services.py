@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from webapp.config import settings
-from webapp.models import ComponentList, Job, Resolution, utcnow
+from webapp.models import Job, Resolution, utcnow
 
 DEDUPE_WINDOW = timedelta(hours=1)
 

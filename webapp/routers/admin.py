@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from webapp.auth import current_user, is_admin, require_admin
+from webapp.auth import current_user, require_admin
 from webapp.db import get_db
 from webapp.models import User
 from webapp.seed import export_lists, import_lists, parse_yaml

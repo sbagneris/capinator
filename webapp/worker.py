@@ -7,7 +7,6 @@ facet cache costs zero extra queries), requeues orphaned ``running`` jobs on sta
 backs off when the shared key's remaining quota runs low.
 """
 import threading
-import time
 from typing import Any, Dict, Optional
 
 from sqlalchemy import func, select
