@@ -1,3 +1,4 @@
 # Development dependencies (test suite). Install with:
 #   pip install -r requirements-dev.txt
 pytest>=8
+httpx        # required by starlette.testclient (webapp tests)

@@ -1,0 +1,16 @@
+# Durable component-list catalog (see webapp/seed.py). Committed to git and auto-loaded
+# on startup so the catalog survives Render's ephemeral disk. Edit here, or curate in the
+# app and re-export from /admin. `components` keys are the CSV header; values are strings.
+- key: marantz-2270-main
+  name: "Marantz 2270 main board recap"
+  component_type: aluminum_electrolytic_capacitor
+  device_make: Marantz
+  device_model: "2270"
+  board_reference: "P700 main amp"
+  notes: "Example seed entry — adjust to taste."
+  owner_email: curator@capinator.local
+  is_public: true
+  components:
+    - {qty: "2", capacitance: "1000", voltage: "50", mounting: THT, package: R, lifetime: "7000", temp: "105", packaging: Bulk, fudge: "10"}
+    - {qty: "4", capacitance: "470", voltage: "35", mounting: THT, package: R, lifetime: "7000", temp: "105", packaging: Bulk, fudge: "10"}
+    - {qty: "6", capacitance: "100", voltage: "25", mounting: THT, package: R, lifetime: "7000", temp: "105", packaging: Bulk, fudge: "10"}

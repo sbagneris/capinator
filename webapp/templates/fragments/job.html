@@ -1,0 +1,46 @@
+<div id="job-{{ job.id }}" class="job status-{{ job.status }}"
+     {% if job.status in ['queued', 'running'] %}
+     hx-get="/jobs/{{ job.id }}" hx-trigger="load delay:2s" hx-swap="outerHTML"
+     {% endif %}>
+
+  {% if job.status in ['queued', 'running'] %}
+    <p class="status">Working… <span class="spin">({{ job.status }})</span></p>
+
+  {% elif job.status == 'error' %}
+    <p class="status error">Error: {{ job.error }}</p>
+
+  {% else %}
+    <p class="status done">
+      Done — this run used <strong>{{ job.digikey_calls }}</strong> DigiKey queries{% if job.remaining_quota is not none %},
+      <strong>{{ job.remaining_quota }}</strong> remaining today{% endif %}.
+    </p>
+
+    <label>Result — paste into DigiKey's bulk order form
+      <textarea id="result-{{ job.id }}" rows="8" readonly>{{ job.result }}</textarea>
+    </label>
+    <button type="button"
+      onclick="navigator.clipboard.writeText(document.getElementById('result-{{ job.id }}').value)">Copy</button>
+
+    {% if job.error %}
+      <details class="row-notes">
+        <summary>{{ job.error.split('\n') | length }} row note(s)</summary>
+        <pre>{{ job.error }}</pre>
+      </details>
+    {% endif %}
+
+    {% if user %}
+      <form hx-post="/lists" hx-target="#job-area" hx-swap="innerHTML" class="save">
+        <input type="hidden" name="job_id" value="{{ job.id }}">
+        <h3>Save this list</h3>
+        <input name="name" placeholder="List name" value="{{ meta.get('name', '') }}" required>
+        <input name="device_make" placeholder="Device make" value="{{ meta.get('device_make', '') }}">
+        <input name="device_model" placeholder="Device model" value="{{ meta.get('device_model', '') }}">
+        <input name="board_reference" placeholder="Board reference" value="{{ meta.get('board_reference', '') }}">
+        <input name="notes" placeholder="Notes" value="{{ meta.get('notes', '') }}">
+        <button type="submit">Save to My Lists</button>
+      </form>
+    {% else %}
+      <p class="prompt"><a href="/register">Register</a> or <a href="/login">log in</a> to save this list.</p>
+    {% endif %}
+  {% endif %}
+</div>

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ cl.name }} — capinator{% endblock %}
+{% block content %}
+<p><a href="/lists">← My Lists</a></p>
+<h1>{{ cl.name }}</h1>
+<dl class="meta">
+  {% if cl.device_make or cl.device_model %}<dt>Device</dt><dd>{{ cl.device_make or '' }} {{ cl.device_model or '' }}</dd>{% endif %}
+  {% if cl.board_reference %}<dt>Board</dt><dd>{{ cl.board_reference }}</dd>{% endif %}
+  {% if cl.notes %}<dt>Notes</dt><dd>{{ cl.notes }}</dd>{% endif %}
+  <dt>Type</dt><dd>{{ cl.component_type }}</dd>
+</dl>
+
+<h2>Source list ({{ cl.components | length }} components)</h2>
+<textarea rows="8" readonly class="source">{{ source_csv }}</textarea>
+
+<h2>Resolved parts</h2>
+<form hx-post="/lists/{{ cl.id }}/regenerate" hx-target="#job-area" hx-swap="innerHTML">
+  <button type="submit">Regenerate</button>
+</form>
+<div id="job-area"></div>
+
+{% if cl.latest_resolution %}
+  <h3>Latest ({{ cl.latest_resolution.generated_at.strftime('%Y-%m-%d %H:%M') }},
+    {{ cl.latest_resolution.digikey_calls }} DigiKey queries)</h3>
+  <textarea rows="8" readonly class="source">{{ cl.latest_resolution.output }}</textarea>
+{% else %}
+  <p><em>No resolution yet — click Regenerate.</em></p>
+{% endif %}
+
+{% if cl.resolutions | length > 1 %}
+  <details>
+    <summary>History ({{ cl.resolutions | length }} resolutions)</summary>
+    <ul>
+      {% for r in cl.resolutions %}
+      <li>{{ r.generated_at.strftime('%Y-%m-%d %H:%M') }} — {{ r.digikey_calls }} queries</li>
+      {% endfor %}
+    </ul>
+  </details>
+{% endif %}
+{% endblock %}

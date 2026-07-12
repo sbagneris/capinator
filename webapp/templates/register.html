@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Register — capinator{% endblock %}
+{% block content %}
+<h1>Register</h1>
+{% if error %}<p class="error-box">{{ error }}</p>{% endif %}
+<form method="post" action="/register" class="auth">
+  <label>Email <input type="email" name="email" required></label>
+  <label>Password <input type="password" name="password" required></label>
+  <button type="submit">Create account</button>
+</form>
+<p>Already have an account? <a href="/login">Log in</a>.</p>
+{% endblock %}

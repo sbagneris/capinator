@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Admin — capinator{% endblock %}
+{% block content %}
+<h1>Admin — seed catalog</h1>
+<p class="hint">The component-list catalog lives in a committed YAML file. Export it here,
+commit the download to the repo, and redeploy — startup auto-seed reloads it.</p>
+
+{% if summary %}
+  <p class="notice">Imported: <strong>{{ summary.created }}</strong> created,
+    <strong>{{ summary.updated }}</strong> updated.</p>
+{% endif %}
+{% if error %}<p class="error-box">{{ error }}</p>{% endif %}
+
+<h2>Export</h2>
+<p><a class="button" href="/admin/export">Download component_lists.yaml</a></p>
+
+<h2>Import</h2>
+<form method="post" action="/admin/import">
+  <label>Paste YAML
+    <textarea name="yaml_text" rows="12" placeholder="- key: ...&#10;  name: ...&#10;  components: [...]"></textarea>
+  </label>
+  <button type="submit">Import</button>
+</form>
+{% endblock %}

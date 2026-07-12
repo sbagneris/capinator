@@ -2,11 +2,24 @@
 cache, no network — so tests are fast and don't change meaning when the live
 DigiKey data drifts."""
 import copy
+import os
+import tempfile
+
+# Point the web app at a throwaway SQLite DB and disable startup auto-seed BEFORE any
+# webapp module (which reads settings at import) is imported. setdefault lets a real
+# environment override these.
+_db_fd, _db_path = tempfile.mkstemp(suffix=".db")
+os.close(_db_fd)
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{_db_path}")
+os.environ.setdefault("SECRET_KEY", "test-secret")
+os.environ.setdefault("SEED_ON_STARTUP", "false")
+os.environ.setdefault("ADMIN_EMAILS", "admin@test.local")
+os.environ.setdefault("GUEST_JOB_LIMIT", "2")
 
 import pytest
 
-import libs.digikey as dk
-from facet_loader import FacetTables
+import capinator.digikey as dk
+from capinator.facet_loader import FacetTables
 
 
 @pytest.fixture

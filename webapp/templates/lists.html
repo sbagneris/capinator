@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}My Lists — capinator{% endblock %}
+{% block content %}
+<h1>My Lists</h1>
+{% if not lists %}
+  <p>No saved lists yet. <a href="/">Resolve one</a> and save it.</p>
+{% else %}
+<table class="lists">
+  <thead><tr><th>Name</th><th>Device</th><th>Board</th><th>Components</th><th>Last resolved</th></tr></thead>
+  <tbody>
+    {% for cl in lists %}
+    <tr>
+      <td><a href="/lists/{{ cl.id }}">{{ cl.name }}</a></td>
+      <td>{{ cl.device_make or '' }} {{ cl.device_model or '' }}</td>
+      <td>{{ cl.board_reference or '' }}</td>
+      <td>{{ cl.components | length }}</td>
+      <td>
+        {% if cl.latest_resolution %}
+          {{ cl.latest_resolution.generated_at.strftime('%Y-%m-%d %H:%M') }}
+          ({{ cl.latest_resolution.digikey_calls }} queries)
+        {% else %}<em>never</em>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

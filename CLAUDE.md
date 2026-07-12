@@ -13,30 +13,37 @@ with a "fudge" factor allowing ± % deviation. See `README.md` for user-facing u
 
 ```bash
 source secrets.sh                                   # exports DIGIKEY_CLIENT_ID/SECRET (needed to RUN, not to TEST)
-./capinator.py <input.csv>                           # run the tool -> writes bulk.csv
-.venv/bin/pip install -r requirements-dev.txt        # install pytest
+python -m capinator.cli <input.csv>                  # run the CLI -> writes bulk.csv
+.venv/bin/uvicorn webapp.main:app --workers 1        # run the web app (http://127.0.0.1:8000)
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt   # install deps + pytest
 .venv/bin/python -m pytest -q                        # run all tests (hermetic; no network/creds)
 .venv/bin/python -m pytest tests/test_filters.py::test_is_temp_in_range_within   # single test
 ```
 
-There is no build or lint step. Python 3.13, deps live in `.venv` (no runtime
-requirements file yet; runtime deps are `requests`, `requests-oauthlib`, `oauthlib`).
+There is no lint step. Runtime deps are in `requirements.txt`; the web app **must** run
+with `--workers 1` (a single background worker thread serializes DigiKey calls).
 
 ## Architecture
 
-Three layers:
+Core library (`capinator/`) + a web app (`webapp/`). The library layers:
 
-1. **`capinator.py`** — CLI. Reads the input CSV with `DictReader`, builds a params
-   dict per row (dropping empty cells), calls `DigiKeyV4.find_digikey_pn_by_moq`, and
-   appends `qty, part_number, spec` to `bulk.csv`. CSV column names map **directly** to
-   `make_payload` kwargs.
-2. **`libs/digikey.py`** — `DigiKeyV4`: OAuth2 client-credentials auth, `make_payload`
-   (translates kwargs → the v4 search request body), search + pagination, and the nested
-   `Utils` class of spec-string parsers + fudge math that decide which facet values
-   satisfy a requested temp / lifetime / dimension.
-3. **`facet_loader.py`** — turns a search response's `FilterOptions` block into the
-   lookup tables (`PARAMETER_IDS`, `FILTER_VALS`, `MANUFACTURER_IDS`) `make_payload`
+1. **`capinator/cli.py`** + **`capinator/bom.py`** — CLI + reusable BOM logic.
+   `bom.parse_spec` reads CSV text into per-component dicts (keys from the header);
+   `bom.build_bom` builds a params dict per row (dropping empty cells), calls
+   `DigiKeyV4.find_digikey_pn_by_moq`, and formats `qty, part_number, spec` lines;
+   `bom.to_csv` is the inverse of `parse_spec`. CSV column names map **directly** to
+   `make_payload` kwargs. The web worker reuses `build_bom` via a resolver.
+2. **`capinator/digikey.py`** — `DigiKeyV4`: OAuth2 client-credentials auth, `make_payload`
+   (translates kwargs → the v4 search request body), search + pagination, the nested
+   `Utils` spec-string parsers + fudge math, and `call_count` / `rate_limit_*`
+   instrumentation captured from each response's `X-RateLimit-*` headers.
+3. **`capinator/facet_loader.py`** — turns a search response's `FilterOptions` block into
+   the lookup tables (`PARAMETER_IDS`, `FILTER_VALS`, `MANUFACTURER_IDS`) `make_payload`
    needs, and disk-caches them.
+4. **`capinator/resolvers.py`** — `Resolver` protocol + registry keyed by
+   `component_type`; the generalization seam the web layer talks to.
+5. **`webapp/`** — FastAPI app (SQLAlchemy models, one background worker thread, HTMX
+   templates, YAML seed import/export). See `README.md` and the plan for details.
 
 ### The DigiKey v4 filter model (the crux)
 
@@ -55,7 +62,7 @@ The API has no endpoint to enumerate valid filter values. Instead **every**
 cache (`facet_cache.json`) and only calls `fetch_fn` (one broad category-58 query) on a
 cold/expired cache (weekly TTL); on a failed refresh it returns the **stale** cache.
 This replaced an older Selenium UI scrape (`ext_data.py`; the `ElectrolyticCapacitors`
-class in `libs/digikey_data.py` is now dead — only its `Regexes` and `CATEGORY_IDS`
+class in `capinator/digikey_data.py` is now dead — only its `Regexes` and `CATEGORY_IDS`
 are still imported).
 
 ## Critical constraints & gotchas (hard-won this project)
@@ -85,14 +92,15 @@ are still imported).
 
 ## Testing
 
-pytest, configured in `pytest.ini` (`pythonpath = .` so `libs.digikey`/`facet_loader`
-import). Fixtures in `tests/conftest.py` are tiny hand-crafted dicts (not the ~1 MB real
+pytest, configured in `pytest.ini` (`pythonpath = .` so `capinator.digikey`/
+`capinator.facet_loader` import). Fixtures in `tests/conftest.py` are tiny hand-crafted dicts (not the ~1 MB real
 cache) so they're fast and don't change meaning when live data drifts. `bare_api` builds
 a `DigiKeyV4` via `object.__new__` so `make_payload` is testable without auth/network.
 Coverage targets the parsing/cache logic and the payload-shaping gotchas above.
 
 ## Known deferred issues
 
-`main.py` is untouched FastAPI tutorial boilerplate (not wired to anything). CSV columns
-that would need a list (e.g. `manufacturers`) aren't reliably passable through the
-single-string CSV cells. These aren't blockers for the CLI's core use.
+Public sharing (global repo browsing), the public REST API, and additional component-type
+resolvers are Phase 2 (documented, not built). CSV columns that would need a list (e.g.
+`manufacturers`) aren't reliably passable through the single-string CSV cells. These
+aren't blockers for the MVP.
