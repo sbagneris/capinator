@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Account — capinator{% endblock %}
+{% block content %}
+<h1>Account</h1>
+<p class="hint">Signed in as <strong>{{ user.email }}</strong>.</p>
+
+<h2>API keys</h2>
+<p class="hint">Keys authenticate the read-only <a href="/api/docs">public API</a>. Send yours as
+  <code>Authorization: Bearer &lt;key&gt;</code>. Create as many as you like and revoke any at
+  any time. A key can read your own lists plus every publicly shared list.</p>
+
+<div id="account-main">
+  {% include "fragments/account_body.html" %}
+</div>
+{% endblock %}

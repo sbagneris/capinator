@@ -13,6 +13,8 @@
     <nav>
       {% if user %}
         <a href="/lists">My Lists</a>
+        <a href="/account">Account</a>
+        <a href="/api/docs">API Docs</a>
         {% if is_admin(user) %}<a href="/admin">Admin</a>{% endif %}
         <span class="who">{{ user.email }}</span>
         <form method="post" action="/logout" class="inline"><button type="submit">Log out</button></form>

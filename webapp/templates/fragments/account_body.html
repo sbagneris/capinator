@@ -1,0 +1,38 @@
+{% if new_token %}
+<div class="notice token-reveal">
+  <p><strong>Copy your new API key now — it won't be shown again.</strong></p>
+  <code class="token">{{ new_token }}</code>
+  <button type="button"
+          onclick="navigator.clipboard.writeText('{{ new_token }}')">Copy</button>
+</div>
+{% endif %}
+
+<form class="key-form" hx-post="/account/api-keys" hx-target="#account-main" hx-swap="innerHTML">
+  <label>New key name
+    <input name="name" placeholder="e.g. my-laptop" required>
+  </label>
+  <button type="submit">Create key</button>
+</form>
+
+{% if keys %}
+<table class="lists">
+  <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+  <tbody>
+    {% for k in keys %}
+    <tr>
+      <td>{{ k.name }}</td>
+      <td><code>{{ k.prefix }}…</code></td>
+      <td>{{ k.created_at.strftime('%Y-%m-%d') }}</td>
+      <td>{% if k.last_used_at %}{{ k.last_used_at.strftime('%Y-%m-%d %H:%M') }}{% else %}<em>never</em>{% endif %}</td>
+      <td>
+        <button hx-post="/account/api-keys/{{ k.id }}/revoke"
+                hx-target="#account-main" hx-swap="innerHTML"
+                hx-confirm="Revoke this key? Any client using it will stop working.">Revoke</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No API keys yet.</p>
+{% endif %}
