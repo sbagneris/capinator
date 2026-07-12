@@ -11,9 +11,10 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from webapp.api import api_app
 from webapp.config import settings
 from webapp.db import Base, SessionLocal, engine
-from webapp.routers import admin, jobs, pages
+from webapp.routers import account, admin, jobs, pages
 from webapp.seed import seed_from_file_if_present
 from webapp.worker import worker
 
@@ -41,12 +42,19 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="capinator", lifespan=lifespan)
+    # No OpenAPI/docs on the main app: it serves HTML, not a public API. The public
+    # API's own OpenAPI schema + docs live on the mounted sub-app at /api/docs.
+    app = FastAPI(
+        title="capinator", lifespan=lifespan,
+        docs_url=None, redoc_url=None, openapi_url=None,
+    )
     app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/api", api_app)
     app.include_router(pages.router)
     app.include_router(jobs.router)
     app.include_router(admin.router)
+    app.include_router(account.router)
     return app
 
 

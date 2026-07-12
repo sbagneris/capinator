@@ -32,6 +32,11 @@ class User(Base):
     lists: Mapped[List["ComponentList"]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
     )
+    api_keys: Mapped[List["ApiKey"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="ApiKey.created_at.desc()",
+    )
 
 
 class ComponentList(Base):
@@ -81,6 +86,31 @@ class Resolution(Base):
     digikey_calls: Mapped[int] = mapped_column(Integer, default=0)
 
     component_list: Mapped["ComponentList"] = relationship(back_populates="resolutions")
+
+
+class ApiKey(Base):
+    """A hashed key for the read-only public API. Only an HMAC-SHA256 digest is stored;
+    the plaintext token (``cap_…``) is shown to the user exactly once at creation.
+    ``prefix`` is a non-secret slice used for O(1) lookup and UI display."""
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    prefix: Mapped[str] = mapped_column(String(16), index=True)
+    key_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="api_keys")
+
+    @property
+    def is_active(self) -> bool:
+        if self.revoked_at is not None:
+            return False
+        return self.expires_at is None or self.expires_at > utcnow()
 
 
 class Job(Base):

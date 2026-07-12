@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Worker back-off: pause dequeuing when remaining quota drops to/below this.
     quota_low_water: int = 5
 
+    # Public API: max requests per API key per minute (read-only; no DigiKey calls).
+    api_rate_limit_per_min: int = 60
+
     @cached_property
     def admin_email_set(self) -> Set[str]:
         emails = {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
