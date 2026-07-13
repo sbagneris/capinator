@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Job limits
     guest_job_limit: int = 2          # jobs per guest per 24h
     max_spec_rows: int = 100          # cap pasted-list size to bound per-job API calls
+    guest_retention_hours: int = 48   # unclaimed guest jobs are purged after this many hours
 
     # Seed catalog (flat-file durability for Render's ephemeral disk)
     seed_file: str = "seed/component_lists.yaml"

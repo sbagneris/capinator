@@ -107,8 +107,8 @@ def test_job_lifecycle_done(client):
     assert created.status_code == 200
     jid = _job_id(created.text)
     _run_job(jid)
-    done = client.get(f"/jobs/{jid}")
-    assert "Done" in done.text
+    done = client.get(f"/jobs/{jid}")            # full job detail page now
+    assert done.status_code == 200
     assert "PN-100" in done.text and "PN-220" in done.text
     assert "DigiKey queries" in done.text
     db = SessionLocal()
@@ -119,23 +119,27 @@ def test_job_lifecycle_done(client):
         db.close()
 
 
-# ---- save + regenerate ---------------------------------------------------
-def test_save_creates_list_and_resolution_then_regenerate_adds_second(client):
-    client.post("/register", data={"email": "user@x.com", "password": "pw"})
+def test_status_fragment_polls_and_shows_result(client):
     created = client.post("/jobs", data={"spec": SPEC})
     jid = _job_id(created.text)
     _run_job(jid)
+    frag = client.get(f"/jobs/{jid}/status")     # the HTMX poll fragment
+    assert frag.status_code == 200
+    assert "PN-100" in frag.text and 'id="job-' in frag.text
 
-    saved = client.post(
-        "/lists", data={"job_id": jid, "name": "My recap"}, follow_redirects=False
-    )
-    assert saved.status_code == 204
-    assert saved.headers["HX-Redirect"].startswith("/lists/")
+
+# ---- save-by-default + regenerate ----------------------------------------
+def test_autosave_creates_list_then_regenerate_adds_second(client):
+    client.post("/register", data={"email": "user@x.com", "password": "pw"})
+    created = client.post("/jobs", data={"spec": SPEC, "name": "My recap"})
+    jid = _job_id(created.text)
+    _run_job(jid)
+    client.get(f"/jobs/{jid}")  # viewing a done owned job auto-saves it as a List
 
     db = SessionLocal()
     try:
         cl = db.query(ComponentList).one()
-        assert cl.name == "My recap"
+        assert cl.name == "My recap"       # from the metadata typed on the form
         assert db.query(Resolution).count() == 1
         list_id = cl.id
     finally:
@@ -148,9 +152,107 @@ def test_save_creates_list_and_resolution_then_regenerate_adds_second(client):
 
     db = SessionLocal()
     try:
-        assert db.query(Resolution).count() == 2  # history preserved
+        assert db.query(Resolution).count() == 2  # history preserved, one list
+        assert db.query(ComponentList).count() == 1
     finally:
         db.close()
+
+
+# ---- activity page + access control --------------------------------------
+def test_activity_lists_own_jobs_only(client):
+    from fastapi.testclient import TestClient
+    created = client.post("/jobs", data={"spec": SPEC})
+    jid = _job_id(created.text)
+    mine = client.get("/jobs")
+    assert mine.status_code == 200 and f"/jobs/{jid}" in mine.text
+    # a different browser (fresh cookie jar) is a different guest
+    other = TestClient(app)
+    assert f"/jobs/{jid}" not in other.get("/jobs").text
+    assert other.get(f"/jobs/{jid}").status_code == 404  # cannot view another's job
+
+
+def test_register_claims_guest_jobs(client):
+    created = client.post("/jobs", data={"spec": SPEC, "name": "Guest run"})
+    jid = _job_id(created.text)
+    _run_job(jid)
+    client.post("/register", data={"email": "claimer@x.com", "password": "pw"})
+    # the guest job is now owned + promoted to a List
+    db = SessionLocal()
+    try:
+        from webapp.models import Job, User
+        user = db.query(User).filter_by(email="claimer@x.com").one()
+        assert db.get(Job, jid).user_id == user.id
+        assert db.query(ComponentList).filter_by(owner_id=user.id).count() == 1
+    finally:
+        db.close()
+
+
+def test_edit_list_toggles_public(client):
+    client.post("/register", data={"email": "pub@x.com", "password": "pw"})
+    created = client.post("/jobs", data={"spec": SPEC})
+    jid = _job_id(created.text)
+    _run_job(jid)
+    client.get(f"/jobs/{jid}")  # auto-save
+    db = SessionLocal()
+    try:
+        list_id = db.query(ComponentList).one().id
+    finally:
+        db.close()
+    client.post(f"/lists/{list_id}/edit", data={"name": "Renamed", "is_public": "on"})
+    db = SessionLocal()
+    try:
+        cl = db.get(ComponentList, list_id)
+        assert cl.name == "Renamed" and cl.is_public is True
+    finally:
+        db.close()
+    # the list detail page renders with the new name + public status
+    page = client.get(f"/lists/{list_id}")
+    assert page.status_code == 200 and "Renamed" in page.text and "Public" in page.text
+
+
+# ---- public sharing ------------------------------------------------------
+def _make_saved_list(client, spec=SPEC, name="A list"):
+    created = client.post("/jobs", data={"spec": spec, "name": name})
+    jid = _job_id(created.text)
+    _run_job(jid)
+    client.get(f"/jobs/{jid}")  # auto-save
+    db = SessionLocal()
+    try:
+        return db.query(ComponentList).order_by(ComponentList.id.desc()).first().id
+    finally:
+        db.close()
+
+
+def test_public_list_viewable_by_others_but_readonly(client):
+    from fastapi.testclient import TestClient
+    client.post("/register", data={"email": "owner@x.com", "password": "pw"})
+    list_id = _make_saved_list(client, name="Shared recap")
+    client.post(f"/lists/{list_id}/edit", data={"name": "Shared recap", "is_public": "on"})
+
+    guest = TestClient(app)                      # fresh cookie jar => a stranger
+    page = guest.get(f"/lists/{list_id}")
+    assert page.status_code == 200
+    assert "Shared recap" in page.text and "PN-100" in page.text  # content visible
+    assert "Regenerate" not in page.text and "/edit" not in page.text  # no owner controls
+
+
+def test_private_list_hidden_from_non_owner(client):
+    from fastapi.testclient import TestClient
+    client.post("/register", data={"email": "priv@x.com", "password": "pw"})
+    list_id = _make_saved_list(client)           # private by default
+    assert TestClient(app).get(f"/lists/{list_id}").status_code == 404
+
+
+def test_public_index_lists_public_only(client):
+    from fastapi.testclient import TestClient
+    client.post("/register", data={"email": "idx@x.com", "password": "pw"})
+    pub_id = _make_saved_list(client, name="PubList")
+    client.post(f"/lists/{pub_id}/edit", data={"name": "PubList", "is_public": "on"})
+    _make_saved_list(client, spec="qty,capacitance,voltage\n9,47,25\n", name="PrivList")
+
+    idx = TestClient(app).get("/public")         # visible to guests
+    assert idx.status_code == 200
+    assert "PubList" in idx.text and "PrivList" not in idx.text
 
 
 # ---- admin gating --------------------------------------------------------

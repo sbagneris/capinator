@@ -7,6 +7,7 @@ facet cache costs zero extra queries), requeues orphaned ``running`` jobs on sta
 backs off when the shared key's remaining quota runs low.
 """
 import threading
+import time
 from typing import Any, Dict, Optional
 
 from sqlalchemy import func, select
@@ -15,9 +16,11 @@ from capinator.resolvers import get_resolver
 from webapp.config import settings
 from webapp.db import SessionLocal
 from webapp.models import Job, utcnow
+from webapp.services import purge_expired_guest_jobs
 
 POLL_SECONDS = 1.0
 BACKOFF_SECONDS = 60.0
+PURGE_INTERVAL_SECONDS = 3600.0  # sweep unclaimed expired guest jobs at most hourly
 
 
 class Worker:
@@ -25,6 +28,7 @@ class Worker:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._clients: Dict[str, Any] = {}   # component_type -> API client singleton
+        self._last_purge: float = 0.0         # monotonic timestamp of the last guest purge
         # Latest usage snapshot, surfaced to the UI via GET /quota.
         self.rate_limit_limit: int = 0
         self.rate_limit_remaining: Optional[int] = None
@@ -55,8 +59,21 @@ class Worker:
             db.close()
 
     # ---- main loop -------------------------------------------------------
+    def _maybe_purge(self) -> None:
+        """Sweep unclaimed expired guest jobs, at most once per PURGE_INTERVAL_SECONDS."""
+        now = time.monotonic()
+        if now - self._last_purge < PURGE_INTERVAL_SECONDS:
+            return
+        self._last_purge = now
+        db = SessionLocal()
+        try:
+            purge_expired_guest_jobs(db)
+        finally:
+            db.close()
+
     def _run(self) -> None:
         while not self._stop.is_set():
+            self._maybe_purge()
             if self._should_backoff():
                 self.backing_off = True
                 self._stop.wait(BACKOFF_SECONDS)

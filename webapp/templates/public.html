@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Public lists — capinator{% endblock %}
+{% block content %}
+<h1>Public lists</h1>
+<p class="hint">Component lists shared by the community — open one to view its resolved parts.</p>
+
+{% if not lists %}
+  <p><em>No public lists yet.</em></p>
+{% else %}
+<table class="lists">
+  <thead>
+    <tr><th>Name</th><th>Device</th><th>Components</th></tr>
+  </thead>
+  <tbody>
+  {% for cl in lists %}
+    <tr>
+      <td><a href="/lists/{{ cl.id }}">{{ cl.name }}</a></td>
+      <td>{{ cl.device_make or '' }} {{ cl.device_model or '' }}</td>
+      <td>{{ cl.components | length }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
