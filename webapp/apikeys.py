@@ -14,7 +14,8 @@ import time
 from datetime import timedelta
 from typing import Dict, List, Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,14 @@ from webapp.db import get_db
 from webapp.models import ApiKey, User, utcnow
 
 TOKEN_PREFIX = "cap_"
+
+# Declaring the scheme (rather than reading the header by hand) is what makes the Swagger
+# UI at /api/docs render an "Authorize" button so tokens can be entered in "Try it out".
+# auto_error=False so we keep our own 401 messages instead of HTTPBearer's generic 403.
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description="Your `cap_…` API key (create one on your account page).",
+)
 # The non-secret slice stored/displayed and used for O(1) lookup ("cap_" + 8 chars).
 PREFIX_LEN = 12
 # Don't write last_used_at on every request; only when it's this stale.
@@ -94,12 +103,15 @@ def _touch_last_used(db: Session, key: ApiKey) -> None:
         db.commit()
 
 
-def require_api_key(request: Request, db: Session = Depends(get_db)) -> User:
-    """FastAPI dependency: authenticate a request via ``Authorization: Bearer <token>``,
-    enforce the per-key rate limit, and return the owning user."""
-    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    token = token.strip()
-    if scheme.lower() != "bearer" or not token:
+def require_api_key(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """FastAPI dependency: authenticate via ``Authorization: Bearer <token>`` (declared as
+    an OpenAPI bearer scheme so Swagger's "Authorize" works), enforce the per-key rate
+    limit, and return the owning user."""
+    token = credentials.credentials.strip() if credentials else ""
+    if not token:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             "Missing or malformed Authorization header (use 'Bearer <api-key>').",

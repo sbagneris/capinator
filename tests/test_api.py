@@ -63,6 +63,18 @@ def _seed():
         db.close()
 
 
+def test_openapi_declares_bearer_security_for_swagger(client):
+    schema = client.get("/api/openapi.json").json()
+    schemes = schema.get("components", {}).get("securitySchemes", {})
+    # a declared HTTP bearer scheme is what makes Swagger UI render the Authorize button
+    assert any(
+        s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes.values()
+    ), "no HTTP bearer security scheme -> Swagger has no way to enter the token"
+    # and the protected endpoints must reference it
+    assert schema["paths"]["/v1/lists"]["get"].get("security"), \
+        "protected endpoint doesn't require the security scheme"
+
+
 def test_requires_valid_key(client):
     assert client.get("/api/v1/lists").status_code == 401
     assert client.get("/api/v1/lists", headers=_auth("cap_bogus")).status_code == 401
