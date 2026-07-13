@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Job {{ job.id }} — capinator{% endblock %}
+{% block content %}
+<p><a href="/jobs">← Activity</a></p>
+<h1>Job {{ job.id }} <span class="badge badge-{{ job.status }}">{{ job.status }}</span></h1>
+<p class="hint">Submitted {{ job.created_at.strftime('%Y-%m-%d %H:%M') }}.</p>
+
+{% if job.status in ['queued', 'running'] %}
+  <div hx-get="/jobs/{{ job.id }}/status" hx-trigger="load delay:2s" hx-swap="outerHTML">
+    <p class="status">Working… <span class="spin">({{ job.status }})</span></p>
+  </div>
+{% endif %}
+
+<h2>Component list ({{ job.input_components | length }} components)</h2>
+<textarea rows="8" readonly class="source">{{ source_csv }}</textarea>
+
+{% if job.status == 'done' %}
+  <h2>Resolved parts</h2>
+  <p class="status done">Used <strong>{{ job.digikey_calls }}</strong> DigiKey queries{% if job.remaining_quota is not none %},
+    <strong>{{ job.remaining_quota }}</strong> remaining today{% endif %}.</p>
+  <textarea id="detail-result" rows="8" readonly class="source">{{ job.result }}</textarea>
+  <button type="button"
+    onclick="navigator.clipboard.writeText(document.getElementById('detail-result').value)">Copy</button>
+  {% if job.error %}
+    <details class="row-notes">
+      <summary>{{ job.error.split('\n') | length }} row note(s)</summary>
+      <pre>{{ job.error }}</pre>
+    </details>
+  {% endif %}
+{% elif job.status == 'error' %}
+  <p class="status error">Error: {{ job.error }}</p>
+{% endif %}
+
+{% if component_list %}
+  <p class="saved">Saved to
+    <a href="/lists/{{ component_list.id }}">My Lists — {{ component_list.name }}</a>
+    · <a href="/lists/{{ component_list.id }}">edit / make public</a></p>
+{% elif user is none %}
+  <p class="prompt"><a href="/register">Register</a> or <a href="/login">log in</a> to keep this —
+    guest runs are kept for {{ guest_retention_hours }} hours.</p>
+{% endif %}
+{% endblock %}

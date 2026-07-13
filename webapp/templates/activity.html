@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Activity — capinator{% endblock %}
+{% block content %}
+<h1>Activity</h1>
+
+{% if user is none %}
+  <p class="hint">You're browsing as a guest — these runs are kept for
+    <strong>{{ guest_retention_hours }} hours</strong> on this browser, then purged.
+    <a href="/register">Register</a> to keep them permanently.</p>
+{% endif %}
+
+{% if not jobs %}
+  <p><em>No runs yet. <a href="/">Resolve a list</a> to get started.</em></p>
+{% else %}
+<table class="activity"
+  {% if any_active %}
+  hx-get="/jobs" hx-trigger="load delay:2s" hx-select="table.activity" hx-swap="outerHTML"
+  {% endif %}>
+  <thead>
+    <tr><th>When</th><th>Status</th><th>Components</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for job in jobs %}
+    <tr class="status-{{ job.status }}">
+      <td>{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td><span class="badge badge-{{ job.status }}">{{ job.status }}</span></td>
+      <td>{{ job.input_components | length }}</td>
+      <td><a href="/jobs/{{ job.id }}">view →</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

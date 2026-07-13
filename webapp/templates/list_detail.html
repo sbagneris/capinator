@@ -1,30 +1,50 @@
 {% extends "base.html" %}
 {% block title %}{{ cl.name }} — capinator{% endblock %}
 {% block content %}
-<p><a href="/lists">← My Lists</a></p>
-<h1>{{ cl.name }}</h1>
+{% if is_owner %}<p><a href="/lists">← My Lists</a></p>
+{% else %}<p><a href="/public">← Public lists</a></p>{% endif %}
+<h1>{{ cl.name }}{% if cl.is_public and not is_owner %} <span class="badge">shared</span>{% endif %}</h1>
 <dl class="meta">
   {% if cl.device_make or cl.device_model %}<dt>Device</dt><dd>{{ cl.device_make or '' }} {{ cl.device_model or '' }}</dd>{% endif %}
   {% if cl.board_reference %}<dt>Board</dt><dd>{{ cl.board_reference }}</dd>{% endif %}
   {% if cl.notes %}<dt>Notes</dt><dd>{{ cl.notes }}</dd>{% endif %}
   <dt>Type</dt><dd>{{ cl.component_type }}</dd>
+  <dt>Visibility</dt><dd>{{ 'Public' if cl.is_public else 'Private' }}</dd>
 </dl>
+
+{% if is_owner %}
+<details class="edit">
+  <summary>Edit details / visibility</summary>
+  <form method="post" action="/lists/{{ cl.id }}/edit" class="edit-form">
+    <input name="name" value="{{ cl.name }}" placeholder="List name" required>
+    <input name="device_make" value="{{ cl.device_make or '' }}" placeholder="Device make">
+    <input name="device_model" value="{{ cl.device_model or '' }}" placeholder="Device model">
+    <input name="board_reference" value="{{ cl.board_reference or '' }}" placeholder="Board reference">
+    <input name="notes" value="{{ cl.notes or '' }}" placeholder="Notes">
+    <label class="check"><input type="checkbox" name="is_public" {% if cl.is_public %}checked{% endif %}>
+      Public — anyone can view this list</label>
+    <button type="submit">Save changes</button>
+  </form>
+</details>
+{% endif %}
 
 <h2>Source list ({{ cl.components | length }} components)</h2>
 <textarea rows="8" readonly class="source">{{ source_csv }}</textarea>
 
 <h2>Resolved parts</h2>
+{% if is_owner %}
 <form hx-post="/lists/{{ cl.id }}/regenerate" hx-target="#job-area" hx-swap="innerHTML">
   <button type="submit">Regenerate</button>
 </form>
 <div id="job-area"></div>
+{% endif %}
 
 {% if cl.latest_resolution %}
   <h3>Latest ({{ cl.latest_resolution.generated_at.strftime('%Y-%m-%d %H:%M') }},
     {{ cl.latest_resolution.digikey_calls }} DigiKey queries)</h3>
   <textarea rows="8" readonly class="source">{{ cl.latest_resolution.output }}</textarea>
 {% else %}
-  <p><em>No resolution yet — click Regenerate.</em></p>
+  <p><em>No resolution yet{% if is_owner %} — click Regenerate{% endif %}.</em></p>
 {% endif %}
 
 {% if cl.resolutions | length > 1 %}

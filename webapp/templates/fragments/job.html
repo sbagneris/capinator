@@ -1,6 +1,6 @@
 <div id="job-{{ job.id }}" class="job status-{{ job.status }}"
      {% if job.status in ['queued', 'running'] %}
-     hx-get="/jobs/{{ job.id }}" hx-trigger="load delay:2s" hx-swap="outerHTML"
+     hx-get="/jobs/{{ job.id }}/status" hx-trigger="load delay:2s" hx-swap="outerHTML"
      {% endif %}>
 
   {% if job.status in ['queued', 'running'] %}
@@ -28,19 +28,17 @@
       </details>
     {% endif %}
 
-    {% if user %}
-      <form hx-post="/lists" hx-target="#job-area" hx-swap="innerHTML" class="save">
-        <input type="hidden" name="job_id" value="{{ job.id }}">
-        <h3>Save this list</h3>
-        <input name="name" placeholder="List name" value="{{ meta.get('name', '') }}" required>
-        <input name="device_make" placeholder="Device make" value="{{ meta.get('device_make', '') }}">
-        <input name="device_model" placeholder="Device model" value="{{ meta.get('device_model', '') }}">
-        <input name="board_reference" placeholder="Board reference" value="{{ meta.get('board_reference', '') }}">
-        <input name="notes" placeholder="Notes" value="{{ meta.get('notes', '') }}">
-        <button type="submit">Save to My Lists</button>
-      </form>
+    {% if component_list %}
+      <p class="saved">Saved to
+        <a href="/lists/{{ component_list.id }}">My Lists — {{ component_list.name }}</a>
+        · <a href="/lists/{{ component_list.id }}">edit / make public</a></p>
+    {% elif user %}
+      <p class="saved">Saved to your <a href="/jobs">activity</a>.</p>
     {% else %}
-      <p class="prompt"><a href="/register">Register</a> or <a href="/login">log in</a> to save this list.</p>
+      <p class="prompt"><a href="/register">Register</a> or <a href="/login">log in</a> to keep this list —
+        guest runs are kept for {{ guest_retention_hours }} hours, then purged.</p>
     {% endif %}
+
+    <p class="joblink"><a href="/jobs/{{ job.id }}">Open job page ↗</a></p>
   {% endif %}
 </div>
