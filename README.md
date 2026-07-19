@@ -105,6 +105,26 @@ the SQLite DB on every deploy. On startup the app auto-seeds from that file. To 
 changes made in the app: an admin opens **`/admin`**, clicks **Export**, and commits the
 downloaded YAML. (There's no shell on the Render free tier, so export/import is UI-driven.)
 
+### Deployment (self-hosted: Docker Compose + Postgres + Caddy)
+
+The recommended production setup for a VPS (e.g. DigitalOcean). One command brings up
+Postgres, the app, and Caddy (automatic Let's Encrypt HTTPS):
+
+```bash
+cp .env.example .env     # then edit: DOMAIN, POSTGRES_PASSWORD, SECRET_KEY, DIGIKEY_*
+docker compose up -d --build
+```
+
+- **Postgres** is the durable store (a `pgdata` volume) — no more ephemeral disk. Back it up.
+- **App** runs `alembic upgrade head` on start, then a single uvicorn worker; the in-process
+  background thread stays the sole DigiKey-serializing worker, so **never scale this service**.
+- **Caddy** obtains and auto-renews a Let's Encrypt cert for `DOMAIN` (ports 80/443 must be
+  open on the droplet). Before DNS is pointed, set `DOMAIN=localhost` for self-signed TLS,
+  then switch to the real hostname once the A record resolves and re-run `docker compose up -d`.
+
+**`SECRET_KEY` must be set once and kept stable** — it signs sessions *and* keys the
+API-token HMAC, so rotating it logs everyone out and invalidates every issued API key.
+
 ### Deployment (Render free tier)
 
 `render.yaml` describes a single free web service. The SQLite DB is ephemeral; for durable
@@ -125,3 +145,5 @@ SQLite→Postgres is just a URL change).
 | `seed/component_lists.yaml` | durable, committed component-list catalog |
 | `alembic/` | database migrations (SQLite dev → Postgres prod) |
 | `tests/` | pytest suite (hermetic; no network/credentials) |
+| `Dockerfile`, `entrypoint.sh` | app image (migrate → single uvicorn worker) |
+| `docker-compose.yml`, `Caddyfile` | self-hosted stack: Postgres + app + Caddy (auto HTTPS) |

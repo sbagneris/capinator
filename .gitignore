@@ -5,6 +5,8 @@ libs/__pycache__/*.pyc
 util/ext_*
 ext_*
 *.sh
+# the container entrypoint IS tracked (secrets.sh etc. stay ignored)
+!entrypoint.sh
 
 # Generated facet lookup cache (rebuilt from the API on a cold/expired cache)
 facet_cache.json

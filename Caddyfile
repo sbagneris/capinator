@@ -1,0 +1,21 @@
+# Caddy reverse proxy with automatic HTTPS.
+#
+# {$DOMAIN} comes from the DOMAIN env var (docker-compose.yml -> .env):
+#   - a real public hostname whose DNS A record points at this server
+#     => Caddy fetches and auto-renews a Let's Encrypt certificate, and redirects
+#        HTTP -> HTTPS, with no extra config.
+#   - a local name (e.g. localhost) => Caddy serves its own internal (self-signed) TLS,
+#     handy before DNS is pointed.
+#
+# For a real domain, set an email for expiry notices by uncommenting the global block.
+# To avoid Let's Encrypt rate limits while first testing, temporarily uncomment the
+# staging CA line (then remove it and `docker compose restart caddy` for a real cert).
+
+# {
+# 	email you@example.com
+# 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+# }
+
+{$DOMAIN} {
+	reverse_proxy app:8000
+}
