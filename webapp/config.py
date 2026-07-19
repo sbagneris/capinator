@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     # Sessions / auth
     secret_key: str = "dev-insecure-change-me"
+    cookie_secure: bool = False  # set true in prod (HTTPS) so the session cookie is Secure
 
     # Job limits
     guest_job_limit: int = 2          # jobs per guest per 24h

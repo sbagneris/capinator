@@ -48,7 +48,11 @@ def create_app() -> FastAPI:
         title="capinator", lifespan=lifespan,
         docs_url=None, redoc_url=None, openapi_url=None,
     )
-    app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.secret_key,
+        https_only=settings.cookie_secure,  # Secure cookie behind Caddy's TLS in prod
+    )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.mount("/api", api_app)
     app.include_router(pages.router)

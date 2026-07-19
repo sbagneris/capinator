@@ -13,6 +13,7 @@ jinja2
 python-multipart
 sqlalchemy>=2
 alembic
+psycopg[binary]  # PostgreSQL driver for postgresql+psycopg:// (SQLite needs no driver)
 passlib[bcrypt]
 bcrypt<4.1  # passlib 1.7.x reads bcrypt.__about__, removed in bcrypt 4.1
 itsdangerous
