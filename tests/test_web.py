@@ -68,6 +68,28 @@ def test_quota_unknown_before_any_job(client):
     assert "unknown" in r.text
 
 
+def test_worker_persists_rate_limit_state_for_the_web_tier(client):
+    # The worker runs in a separate process in prod, so it writes rate-limit state to the
+    # DB (WorkerState); the web tier's quota_snapshot reads it (not the worker's memory).
+    from webapp.models import WorkerState
+    from webapp.worker import quota_snapshot
+
+    created = client.post("/jobs", data={"spec": SPEC})
+    jid = _job_id(created.text)
+    _run_job(jid)  # worker processes the job -> should persist WorkerState
+
+    db = SessionLocal()
+    try:
+        ws = db.query(WorkerState).one()          # singleton row written by the worker
+        assert ws.rate_limit_remaining is not None
+        q = quota_snapshot(db)
+        assert q["rate_limit_remaining"] == ws.rate_limit_remaining
+        assert q["rate_limit_limit"] == 1000       # FakeApi's rate_limit_limit
+        assert q["backing_off"] is False
+    finally:
+        db.close()
+
+
 # ---- auth ----------------------------------------------------------------
 def test_register_login_logout(client):
     r = client.post("/register", data={"email": "a@b.com", "password": "pw"})

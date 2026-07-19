@@ -16,7 +16,6 @@ from webapp.config import settings
 from webapp.db import Base, SessionLocal, engine
 from webapp.routers import account, admin, jobs, pages
 from webapp.seed import seed_from_file_if_present
-from webapp.worker import worker
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -34,11 +33,8 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    worker.start()
-    try:
-        yield
-    finally:
-        worker.stop()
+    # The DigiKey worker runs as its own process (`python -m webapp.worker`), not here.
+    yield
 
 
 def create_app() -> FastAPI:
