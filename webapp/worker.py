@@ -12,7 +12,8 @@ import logging
 import signal
 import threading
 import time
-from typing import Any, Dict, Optional
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -30,6 +31,17 @@ POLL_SECONDS = 1.0
 BACKOFF_SECONDS = 60.0
 PURGE_INTERVAL_SECONDS = 3600.0  # sweep unclaimed expired guest jobs at most hourly
 READINESS_RETRY_SECONDS = 2.0    # wait between DB-readiness attempts (app runs migrations)
+
+
+@contextmanager
+def _session() -> Iterator[Any]:
+    """A short-lived session, always closed. The worker owns its sessions (it has no
+    request scope, so it can't use the ``get_db`` dependency)."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def save_worker_state(db, *, limit: int, remaining: Optional[int], backing_off: bool) -> None:
@@ -83,28 +95,23 @@ class Worker:
     def _await_db_ready(self) -> None:
         """Block until the DB is reachable and migrated (a jobs-table read succeeds)."""
         while not self._stop.is_set():
-            db = SessionLocal()
-            try:
-                db.scalar(select(func.count()).select_from(Job))
-                return
-            except (OperationalError, ProgrammingError) as e:
-                log.warning("database not ready (%s) — retrying in %ss",
-                            type(e).__name__, READINESS_RETRY_SECONDS)
-                self._stop.wait(READINESS_RETRY_SECONDS)
-            finally:
-                db.close()
+            with _session() as db:
+                try:
+                    db.scalar(select(func.count()).select_from(Job))
+                    return
+                except (OperationalError, ProgrammingError) as e:
+                    log.warning("database not ready (%s) — retrying in %ss",
+                                type(e).__name__, READINESS_RETRY_SECONDS)
+                    self._stop.wait(READINESS_RETRY_SECONDS)
 
     def _requeue_orphans(self) -> None:
         """A job left 'running' means the process died mid-job — reset it to queued."""
-        db = SessionLocal()
-        try:
+        with _session() as db:
             orphans = db.scalars(select(Job).where(Job.status == "running")).all()
             for job in orphans:
                 job.status = "queued"
             if orphans:
                 db.commit()
-        finally:
-            db.close()
 
     # ---- main loop -------------------------------------------------------
     def _maybe_purge(self) -> None:
@@ -113,13 +120,10 @@ class Worker:
         if now - self._last_purge < PURGE_INTERVAL_SECONDS:
             return
         self._last_purge = now
-        db = SessionLocal()
-        try:
+        with _session() as db:
             deleted = purge_expired_guest_jobs(db)
             if deleted:
                 log.info("purged %d expired guest job(s)", deleted)
-        finally:
-            db.close()
 
     def _run(self) -> None:
         # NOTE: the idle path is deliberately silent — this loop ticks every POLL_SECONDS
@@ -138,7 +142,7 @@ class Worker:
                 continue
             if self.backing_off:
                 log.info("quota window reset — resuming")
-            self.backing_off = False
+                self.backing_off = False
 
             job_id = self._claim_next_job()
             if job_id is None:
@@ -154,8 +158,7 @@ class Worker:
 
     def _claim_next_job(self) -> Optional[int]:
         """Atomically pick the oldest queued job and mark it running; return its id."""
-        db = SessionLocal()
-        try:
+        with _session() as db:
             job = db.scalars(
                 select(Job).where(Job.status == "queued").order_by(Job.created_at).limit(1)
             ).first()
@@ -164,8 +167,6 @@ class Worker:
             job.status = "running"
             db.commit()
             return job.id
-        finally:
-            db.close()
 
     def _get_client(self, component_type: str) -> Any:
         client = self._clients.get(component_type)
@@ -176,8 +177,7 @@ class Worker:
 
     def _process(self, job_id: int) -> None:
         started = time.monotonic()
-        db = SessionLocal()
-        try:
+        with _session() as db:
             job = db.get(Job, job_id)
             if job is None:
                 return
@@ -207,8 +207,6 @@ class Worker:
             finally:
                 job.finished_at = utcnow()
                 db.commit()
-        finally:
-            db.close()
         self._persist_state()  # mirror the latest rate-limit state to the DB for the web tier
 
     def _snapshot_from_client(self, api: Any) -> None:
@@ -216,14 +214,11 @@ class Worker:
         self.rate_limit_remaining = getattr(api, "rate_limit_remaining", self.rate_limit_remaining)
 
     def _persist_state(self) -> None:
-        db = SessionLocal()
-        try:
+        with _session() as db:
             save_worker_state(
                 db, limit=self.rate_limit_limit,
                 remaining=self.rate_limit_remaining, backing_off=self.backing_off,
             )
-        finally:
-            db.close()
 
 
 # Process-wide singleton (also reused by tests, which call `_process` directly).
