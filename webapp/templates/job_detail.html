@@ -19,8 +19,7 @@
   <p class="status done">Used <strong>{{ job.digikey_calls }}</strong> DigiKey queries{% if job.remaining_quota is not none %},
     <strong>{{ job.remaining_quota }}</strong> remaining today{% endif %}.</p>
   <textarea id="detail-result" rows="8" readonly class="source">{{ job.result }}</textarea>
-  <button type="button"
-    onclick="navigator.clipboard.writeText(document.getElementById('detail-result').value)">Copy</button>
+  <button type="button" data-copy-target="detail-result">Copy</button>
   {% if job.error %}
     <details class="row-notes">
       <summary>{{ job.error.split('\n') | length }} row note(s)</summary>

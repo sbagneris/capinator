@@ -2,8 +2,7 @@
 <div class="notice token-reveal">
   <p><strong>Copy your new API key now — it won't be shown again.</strong></p>
   <code class="token">{{ new_token }}</code>
-  <button type="button"
-          onclick="navigator.clipboard.writeText('{{ new_token }}')">Copy</button>
+  <button type="button" data-copy-text="{{ new_token }}">Copy</button>
 </div>
 {% endif %}
 

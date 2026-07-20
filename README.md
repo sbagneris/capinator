@@ -115,10 +115,19 @@ the SQLite DB on every deploy. On startup the app auto-seeds from that file. To 
 changes made in the app: an admin opens **`/admin`**, clicks **Export**, and commits the
 downloaded YAML. (There's no shell on the Render free tier, so export/import is UI-driven.)
 
-### Deployment (self-hosted: Docker Compose + Postgres + Caddy)
+### Deployment (self-hosted: Docker Compose + Postgres)
 
-The recommended production setup for a VPS (e.g. DigitalOcean). One command brings up
-Postgres, the app, the worker, and Caddy (automatic Let's Encrypt HTTPS).
+The recommended production setup for a VPS (e.g. DigitalOcean): this stack runs Postgres,
+the app and the worker.
+
+**TLS and routing live outside this repo.** A shared **edge** stack (Caddy) fronts every
+site on the host and reaches this app over an external Docker network called `edge` — see
+the `krazucky-edge` repo. That keeps one proxy per host (only one process can bind :80/:443)
+and lets each project deploy independently. Create the network once:
+
+```bash
+docker network create edge
+```
 
 **Prerequisite: Docker Compose v2.** This stack uses the Compose Spec (no `version:` key,
 a top-level `name:`, `depends_on: condition: service_healthy`, and `${VAR:?…}` required
@@ -135,19 +144,21 @@ Or use [Docker's official repository](https://docs.docker.com/engine/install/), 
 provides `docker-compose-plugin` and `docker-buildx-plugin` and keeps them current.
 
 ```bash
-cp .env.example .env     # then edit: DOMAIN, POSTGRES_PASSWORD, SECRET_KEY, DIGIKEY_*
+cp .env.example .env     # then edit: POSTGRES_PASSWORD, SECRET_KEY, DIGIKEY_*
 docker compose up -d --build
 ```
 
 - **Postgres** is the durable store (a `pgdata` volume) — no more ephemeral disk. Back it up.
 - **App** runs `alembic upgrade head` on start, then serves the web tier. It no longer runs
   the resolver, so it **may scale** — raise `WEB_CONCURRENCY` (uvicorn workers) or add replicas.
+  It joins the `edge` network under the alias **`capinator-app`**, which is what the edge
+  Caddyfile proxies to (an explicit alias because every project tends to have a service
+  called `app`).
 - **Worker** (`python -m webapp.worker`) is the sole DigiKey-serializing process — **never
   scale it beyond one instance**. It doesn't migrate (the app does) and retries until the
   schema exists.
-- **Caddy** obtains and auto-renews a Let's Encrypt cert for `DOMAIN` (ports 80/443 must be
-  open on the droplet). Before DNS is pointed, set `DOMAIN=localhost` for self-signed TLS,
-  then switch to the real hostname once the A record resolves and re-run `docker compose up -d`.
+- **No ports are published** by this stack — the app is reachable only via the edge proxy.
+  The site's hostname and certificate are configured in the edge repo, not here.
 
 **`SECRET_KEY` must be set once and kept stable** — it signs sessions *and* keys the
 API-token HMAC, so rotating it logs everyone out and invalidates every issued API key.
@@ -173,4 +184,4 @@ SQLite→Postgres is just a URL change).
 | `alembic/` | database migrations (SQLite dev → Postgres prod) |
 | `tests/` | pytest suite (hermetic; no network/credentials) |
 | `Dockerfile`, `entrypoint.sh` | app image (migrate → single uvicorn worker) |
-| `docker-compose.yml`, `Caddyfile` | self-hosted stack: Postgres + app + Caddy (auto HTTPS) |
+| `docker-compose.yml` | self-hosted stack: Postgres + app + worker (TLS via the shared edge) |
