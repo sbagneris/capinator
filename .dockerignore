@@ -20,6 +20,5 @@ response_*.json
 .dockerignore
 Dockerfile
 docker-compose.yml
-Caddyfile
 render.yaml
 .vscode/

@@ -28,7 +28,7 @@ python -m capinator.cli <input.csv>              # CLI -> bulk.csv
 
 alembic upgrade head                             # apply migrations (env.py reads DATABASE_URL)
 alembic check                                    # fail if models drift from migrations
-docker compose up -d --build                     # full stack: db + app + worker + caddy
+docker compose up -d --build                     # this stack: db + app + worker (TLS via the shared edge)
 ```
 
 There is no lint step.
@@ -167,7 +167,11 @@ Patterns to follow:
 
 **Self-hosted (preferred):** `docker-compose.yml` runs `db` (postgres:16, `pgdata` volume),
 `app` (entrypoint runs `alembic upgrade head` then uvicorn), `worker` (same image, entrypoint
-`python -m webapp.worker`, never scaled), and `caddy` (automatic Let's Encrypt for `$DOMAIN`).
+`python -m webapp.worker`, never scaled). **TLS/routing is not in this repo** — a shared
+Caddy **edge** stack (the `krazucky-edge` repo) fronts every site on the host and reaches
+this app over the external `edge` network by the alias **`capinator-app`** (explicit, since
+every project has a service named `app`). This stack publishes no ports; the host's security
+headers and CSP live in the edge Caddyfile. Create the network once: `docker network create edge`.
 The **app owns migrations**; the worker retries until the schema exists. SQLite→Postgres is
 just a `DATABASE_URL` change (`webapp/db.py` no-ops its SQLite-only bits on Postgres).
 

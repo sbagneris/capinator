@@ -1,5 +1,9 @@
-# capinator full stack: Postgres + app (web) + worker (DigiKey) + Caddy (auto HTTPS).
-# The web tier and the single DigiKey worker are separate services (built from one image).
+# capinator stack: Postgres + app (web) + worker (DigiKey), built from one image.
+#
+# TLS/routing is NOT here — a shared Caddy "edge" stack fronts every site on the host and
+# reaches this app over the external `edge` network (see the krazucky-edge repo). Create
+# that network once with `docker network create edge`.
+#
 # Configure via a .env file next to this one (see .env.example). Bring up with:
 #   docker compose up -d --build
 name: capinator
@@ -38,6 +42,11 @@ services:
       WEB_CONCURRENCY: "${WEB_CONCURRENCY:-1}"
     expose:
       - "8000"
+    networks:
+      default: {}          # reach db/worker on this project's private network
+      edge:                # and be reachable by the shared Caddy edge
+        aliases:
+          - capinator-app  # explicit: both projects have a service named "app"
     # The app owns migrations (entrypoint runs `alembic upgrade head`). The DigiKey worker
     # is a separate service, so the web tier MAY scale — raise WEB_CONCURRENCY or add replicas.
 
@@ -54,22 +63,12 @@ services:
     # retries until the schema exists. NEVER scale this service beyond one instance.
     entrypoint: ["python", "-m", "webapp.worker"]
 
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    depends_on:
-      - app
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN:?set DOMAIN in .env (a real hostname for Let's Encrypt, or a local name for self-signed TLS)}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data      # ACME account + issued certs (persist these!)
-      - caddy_config:/config
-
 volumes:
   pgdata:
-  caddy_data:
-  caddy_config:
+
+networks:
+  # Shared with the edge (Caddy) stack and any other site on this host.
+  # Created out-of-band once: `docker network create edge`.
+  edge:
+    external: true
+    name: edge

@@ -18,8 +18,7 @@
     <label>Result — paste into DigiKey's bulk order form
       <textarea id="result-{{ job.id }}" rows="8" readonly>{{ job.result }}</textarea>
     </label>
-    <button type="button"
-      onclick="navigator.clipboard.writeText(document.getElementById('result-{{ job.id }}').value)">Copy</button>
+    <button type="button" data-copy-target="result-{{ job.id }}">Copy</button>
 
     {% if job.error %}
       <details class="row-notes">
