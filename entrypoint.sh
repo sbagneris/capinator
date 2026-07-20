@@ -17,6 +17,10 @@ done
 # The DigiKey worker runs as its own service (python -m webapp.worker), so the web tier can
 # scale: WEB_CONCURRENCY sets the uvicorn worker count (default 1). --proxy-headers so the
 # app trusts Caddy's X-Forwarded-* (correct scheme for Secure cookies / redirects).
+# uvicorn wants a lowercase level; LOG_LEVEL is conventionally upper-case.
+uvicorn_level=$(printf '%s' "${LOG_LEVEL:-info}" | tr 'A-Z' 'a-z')
+
 exec uvicorn webapp.main:app \
   --host 0.0.0.0 --port "${PORT:-8000}" \
-  --workers "${WEB_CONCURRENCY:-1}" --proxy-headers --forwarded-allow-ips="*"
+  --workers "${WEB_CONCURRENCY:-1}" --log-level "$uvicorn_level" \
+  --proxy-headers --forwarded-allow-ips="*"

@@ -6,10 +6,13 @@ the registry, so new component types (resistors, inductors, …) are added as ne
 without touching the app. The MVP ships one resolver — aluminum electrolytic capacitors —
 which simply wraps the existing :class:`~capinator.digikey.DigiKeyV4` client.
 """
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Protocol, runtime_checkable
 
 from capinator.bom import build_bom, parse_spec
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,7 +59,9 @@ class AluminumElectrolyticResolver:
 
     def resolve(self, components: List[Dict[str, Any]], api: Any) -> ResolveResult:
         before = getattr(api, "call_count", 0)
-        result = build_bom(components, api)
+        # build_bom already exposes per-row progress; route it to DEBUG (the CLI passes
+        # `print` instead). Without this the worker resolves rows silently.
+        result = build_bom(components, api, on_progress=log.debug)
         calls = getattr(api, "call_count", 0) - before
         return ResolveResult(
             output="\n".join(result.lines),

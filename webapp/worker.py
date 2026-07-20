@@ -20,6 +20,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 from capinator.resolvers import get_resolver
 from webapp.config import settings
 from webapp.db import SessionLocal
+from webapp.logging_setup import configure_logging
 from webapp.models import Job, WorkerState, utcnow
 from webapp.services import purge_expired_guest_jobs
 
@@ -114,21 +115,29 @@ class Worker:
         self._last_purge = now
         db = SessionLocal()
         try:
-            purge_expired_guest_jobs(db)
+            deleted = purge_expired_guest_jobs(db)
+            if deleted:
+                log.info("purged %d expired guest job(s)", deleted)
         finally:
             db.close()
 
     def _run(self) -> None:
+        # NOTE: the idle path is deliberately silent — this loop ticks every POLL_SECONDS
+        # and logging each tick would bury the interesting events.
         while not self._stop.is_set():
             self._maybe_purge()
             if self._should_backoff():
                 if not self.backing_off:
                     self.backing_off = True
+                    log.warning("DigiKey quota low (%s remaining) — pausing for %.0fs",
+                                self.rate_limit_remaining, BACKOFF_SECONDS)
                     self._persist_state()
                 self._stop.wait(BACKOFF_SECONDS)
                 # Force a fresh reading on the next real query after the window resets.
                 self.rate_limit_remaining = None
                 continue
+            if self.backing_off:
+                log.info("quota window reset — resuming")
             self.backing_off = False
 
             job_id = self._claim_next_job()
@@ -166,11 +175,14 @@ class Worker:
         return client
 
     def _process(self, job_id: int) -> None:
+        started = time.monotonic()
         db = SessionLocal()
         try:
             job = db.get(Job, job_id)
             if job is None:
                 return
+            log.info("job %s claimed (%s, %d components)", job_id, job.component_type,
+                     len(job.input_components or []))
             try:
                 resolver = get_resolver(job.component_type)
                 api = self._get_client(job.component_type)
@@ -181,9 +193,17 @@ class Worker:
                 job.status = "done"
                 self._snapshot_from_client(api)
                 job.remaining_quota = self.rate_limit_remaining
+                log.info(
+                    "job %s done in %.1fs — %d DigiKey calls, %s quota remaining%s",
+                    job_id, time.monotonic() - started, result.digikey_calls,
+                    self.rate_limit_remaining if self.rate_limit_remaining is not None else "?",
+                    f" ({len(result.errors)} row note(s))" if result.errors else "",
+                )
             except Exception as e:  # missing creds, API failure, unknown type, ...
                 job.status = "error"
                 job.error = str(e)
+                log.error("job %s failed after %.1fs: %s",
+                          job_id, time.monotonic() - started, e)
             finally:
                 job.finished_at = utcnow()
                 db.commit()
@@ -212,9 +232,7 @@ worker = Worker()
 
 def main() -> None:
     """`python -m webapp.worker`: run the worker until SIGTERM/SIGINT."""
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    configure_logging()  # stdout, verbosity from LOG_LEVEL
 
     def _handle(signum, _frame):
         log.info("received signal %s — shutting down", signum)

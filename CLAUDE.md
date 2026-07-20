@@ -48,6 +48,11 @@ start it (nothing in `main.py`'s lifespan). This is the single most important op
 - The worker also owns the hourly guest-job purge (`Worker._maybe_purge`).
 - Because the web tier can't see worker memory, the worker mirrors its rate-limit state to a
   **`WorkerState`** singleton row; `worker.quota_snapshot(db)` reads that row for `GET /quota`.
+- **Logging** — `webapp/logging_setup.configure_logging()` (called by `worker.main()` and
+  `create_app()`) sends plain text to **stdout** and raises only the `capinator`/`webapp`
+  namespaces to `LOG_LEVEL`; **root stays WARNING** so DEBUG isn't drowned by urllib3. INFO =
+  worker job lifecycle; DEBUG = per-row (`resolvers` passes `on_progress` into `build_bom`)
+  and per-API-call (`digikey._do_post`). The idle poll loop is deliberately silent.
 
 ## Architecture
 

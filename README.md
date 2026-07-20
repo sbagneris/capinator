@@ -101,6 +101,11 @@ Key points:
   the remaining daily quota runs low.
 - **Guests** get a small daily job limit (`GUEST_JOB_LIMIT`); registering lifts it and
   lets you save lists.
+- **Logging** goes to stdout, with verbosity from `LOG_LEVEL` (default `INFO`). `INFO`
+  gives the worker's job lifecycle (claimed / done with call count + remaining quota /
+  failed); `DEBUG` adds a line per resolved row and per DigiKey API call. Third-party
+  loggers stay at WARNING, so `DEBUG` doesn't drown in connection chatter. Watch it with
+  `docker compose logs -f worker`.
 
 ### Component-list catalog (seed file)
 
