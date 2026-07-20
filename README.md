@@ -118,7 +118,21 @@ downloaded YAML. (There's no shell on the Render free tier, so export/import is 
 ### Deployment (self-hosted: Docker Compose + Postgres + Caddy)
 
 The recommended production setup for a VPS (e.g. DigitalOcean). One command brings up
-Postgres, the app, the worker, and Caddy (automatic Let's Encrypt HTTPS):
+Postgres, the app, the worker, and Caddy (automatic Let's Encrypt HTTPS).
+
+**Prerequisite: Docker Compose v2.** This stack uses the Compose Spec (no `version:` key,
+a top-level `name:`, `depends_on: condition: service_healthy`, and `${VAR:?…}` required
+variables), so the legacy `docker-compose` v1 binary **will not work** — you need the
+`docker compose` (two words) CLI plugin. Many distro packages ship the engine without it;
+if `docker compose version` fails with *"unknown shorthand flag"*, install it:
+
+```bash
+sudo apt install -y docker-compose-v2 docker-buildx      # Debian/Ubuntu
+sudo pacman -S docker-compose docker-buildx              # Arch
+```
+
+Or use [Docker's official repository](https://docs.docker.com/engine/install/), which
+provides `docker-compose-plugin` and `docker-buildx-plugin` and keeps them current.
 
 ```bash
 cp .env.example .env     # then edit: DOMAIN, POSTGRES_PASSWORD, SECRET_KEY, DIGIKEY_*
