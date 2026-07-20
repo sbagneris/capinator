@@ -1,4 +1,5 @@
 # Description: Digikey API wrapper for searching capacitors
+import logging
 import re
 from os import getenv
 from typing import Any, Dict, List, Optional
@@ -6,6 +7,10 @@ from requests_oauthlib import OAuth2Session
 from oauthlib.oauth2 import BackendApplicationClient
 from capinator.digikey_data import CATEGORY_IDS
 from capinator.facet_loader import get_facet_tables, broad_query_payload
+
+# Library logger: never configures handlers, so importing this is silent unless the
+# caller (the worker / CLI) sets logging up.
+log = logging.getLogger(__name__)
 
 # Digi-Key API configuration
 API_BASE = "https://api.digikey.com"
@@ -472,6 +477,11 @@ class DigiKeyV4:
         )
         self.call_count += 1
         self._capture_rate_limit(response)
+        log.debug(
+            "search POST #%d -> HTTP %s (quota %s/%s remaining)",
+            self.call_count, getattr(response, "status_code", "?"),
+            self.rate_limit_remaining, self.rate_limit_limit,
+        )
         return response
 
     def _capture_rate_limit(self, response) -> None:

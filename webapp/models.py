@@ -137,3 +137,15 @@ class Job(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class WorkerState(Base):
+    """Singleton (id=1) row the standalone worker writes so the web tier — which no longer
+    shares the worker's memory — can show the DigiKey rate-limit / backoff status."""
+    __tablename__ = "worker_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # always 1
+    rate_limit_limit: Mapped[int] = mapped_column(Integer, default=0)
+    rate_limit_remaining: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    backing_off: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

@@ -81,21 +81,31 @@ python -m pytest tests/test_filters.py::test_is_temp_in_range_within
 A multi-user web front-end wraps the same resolver: paste a CSV list, get the resolved
 bulk-order lines back, and (when registered) save/curate lists and regenerate them.
 
+The web tier and the DigiKey worker are **two processes** — run both:
+
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 export DIGIKEY_CLIENT_ID=...  DIGIKEY_CLIENT_SECRET=...  SECRET_KEY=$(openssl rand -hex 32)
-.venv/bin/uvicorn webapp.main:app --workers 1        # http://127.0.0.1:8000
+.venv/bin/uvicorn webapp.main:app          # terminal 1 → http://127.0.0.1:8000
+.venv/bin/python -m webapp.worker          # terminal 2 → resolves queued DigiKey jobs
 ```
 
 Key points:
 
-- **One process, one worker.** A single background **thread** runs jobs one at a time —
-  this serialization is the DigiKey rate-limit throttle. Always run with **`--workers 1`**;
-  more uvicorn workers would spawn parallel threads that race the shared API key.
-- **Rate-limit aware.** Every response's `X-RateLimit-*` headers are captured; the header
-  badge shows remaining daily quota and the worker pauses when it runs low.
+- **Separate worker process.** `python -m webapp.worker` is the sole process that calls
+  DigiKey, running jobs one at a time — this serialization is the rate-limit throttle. The
+  web tier is therefore free to scale (multiple uvicorn workers / replicas). Exactly one
+  worker instance must run.
+- **Rate-limit aware.** Every response's `X-RateLimit-*` headers are captured; the worker
+  persists that state to the DB (so the web tier's quota badge reflects it) and pauses when
+  the remaining daily quota runs low.
 - **Guests** get a small daily job limit (`GUEST_JOB_LIMIT`); registering lifts it and
   lets you save lists.
+- **Logging** goes to stdout, with verbosity from `LOG_LEVEL` (default `INFO`). `INFO`
+  gives the worker's job lifecycle (claimed / done with call count + remaining quota /
+  failed); `DEBUG` adds a line per resolved row and per DigiKey API call. Third-party
+  loggers stay at WARNING, so `DEBUG` doesn't drown in connection chatter. Watch it with
+  `docker compose logs -f worker`.
 
 ### Component-list catalog (seed file)
 
@@ -108,7 +118,7 @@ downloaded YAML. (There's no shell on the Render free tier, so export/import is 
 ### Deployment (self-hosted: Docker Compose + Postgres + Caddy)
 
 The recommended production setup for a VPS (e.g. DigitalOcean). One command brings up
-Postgres, the app, and Caddy (automatic Let's Encrypt HTTPS):
+Postgres, the app, the worker, and Caddy (automatic Let's Encrypt HTTPS):
 
 ```bash
 cp .env.example .env     # then edit: DOMAIN, POSTGRES_PASSWORD, SECRET_KEY, DIGIKEY_*
@@ -116,8 +126,11 @@ docker compose up -d --build
 ```
 
 - **Postgres** is the durable store (a `pgdata` volume) — no more ephemeral disk. Back it up.
-- **App** runs `alembic upgrade head` on start, then a single uvicorn worker; the in-process
-  background thread stays the sole DigiKey-serializing worker, so **never scale this service**.
+- **App** runs `alembic upgrade head` on start, then serves the web tier. It no longer runs
+  the resolver, so it **may scale** — raise `WEB_CONCURRENCY` (uvicorn workers) or add replicas.
+- **Worker** (`python -m webapp.worker`) is the sole DigiKey-serializing process — **never
+  scale it beyond one instance**. It doesn't migrate (the app does) and retries until the
+  schema exists.
 - **Caddy** obtains and auto-renews a Let's Encrypt cert for `DOMAIN` (ports 80/443 must be
   open on the droplet). Before DNS is pointed, set `DOMAIN=localhost` for self-signed TLS,
   then switch to the real hostname once the A record resolves and re-run `docker compose up -d`.

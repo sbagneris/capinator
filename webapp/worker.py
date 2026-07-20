@@ -1,62 +1,117 @@
-"""Single in-process background worker.
+"""Standalone background worker.
 
-One daemon thread, in the same process as the web app, runs queued jobs one at a time —
-this serialization *is* the DigiKey rate-limit throttle. It holds one long-lived client
-per component_type (built lazily on first use, so the app boots without creds and a warm
-facet cache costs zero extra queries), requeues orphaned ``running`` jobs on startup, and
-backs off when the shared key's remaining quota runs low.
+Runs as its OWN process — `python -m webapp.worker`; the web app no longer starts it. It
+polls the jobs table and runs queued jobs one at a time (this serialization *is* the
+DigiKey rate-limit throttle), backs off when the shared key's remaining quota runs low,
+sweeps expired guest jobs, and persists its rate-limit state to the DB (``WorkerState``) so
+the web tier — a different process — can display it via ``quota_snapshot``. Exactly ONE
+worker instance must run (the simple claim below is race-free only with a single worker;
+more would need ``FOR UPDATE SKIP LOCKED``).
 """
+import logging
+import signal
 import threading
 import time
-from typing import Any, Dict, Optional
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, Optional
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from capinator.resolvers import get_resolver
 from webapp.config import settings
 from webapp.db import SessionLocal
-from webapp.models import Job, utcnow
+from webapp.logging_setup import configure_logging
+from webapp.models import Job, WorkerState, utcnow
 from webapp.services import purge_expired_guest_jobs
+
+log = logging.getLogger("capinator.worker")
 
 POLL_SECONDS = 1.0
 BACKOFF_SECONDS = 60.0
 PURGE_INTERVAL_SECONDS = 3600.0  # sweep unclaimed expired guest jobs at most hourly
+READINESS_RETRY_SECONDS = 2.0    # wait between DB-readiness attempts (app runs migrations)
+
+
+@contextmanager
+def _session() -> Iterator[Any]:
+    """A short-lived session, always closed. The worker owns its sessions (it has no
+    request scope, so it can't use the ``get_db`` dependency)."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def save_worker_state(db, *, limit: int, remaining: Optional[int], backing_off: bool) -> None:
+    """Upsert the singleton WorkerState row (id=1)."""
+    state = db.get(WorkerState, 1)
+    if state is None:
+        state = WorkerState(id=1)
+        db.add(state)
+    state.rate_limit_limit = limit
+    state.rate_limit_remaining = remaining
+    state.backing_off = backing_off
+    db.commit()
+
+
+def quota_snapshot(db) -> Dict[str, Any]:
+    """Live usage snapshot for GET /quota: the worker's persisted rate-limit state plus
+    queue depth. Reads the DB (the worker is a different process), not worker memory."""
+    state = db.get(WorkerState, 1)
+    queued = db.scalar(select(func.count()).select_from(Job).where(Job.status == "queued"))
+    running = db.scalar(select(func.count()).select_from(Job).where(Job.status == "running"))
+    return {
+        "rate_limit_limit": state.rate_limit_limit if state else 0,
+        "rate_limit_remaining": state.rate_limit_remaining if state else None,
+        "backing_off": state.backing_off if state else False,
+        "queued": queued or 0,
+        "running": running or 0,
+    }
 
 
 class Worker:
     def __init__(self) -> None:
-        self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._clients: Dict[str, Any] = {}   # component_type -> API client singleton
-        self._last_purge: float = 0.0         # monotonic timestamp of the last guest purge
-        # Latest usage snapshot, surfaced to the UI via GET /quota.
+        self._last_purge: float = 0.0
+        # Latest usage, mirrored to the DB (WorkerState) for the web tier.
         self.rate_limit_limit: int = 0
         self.rate_limit_remaining: Optional[int] = None
         self.backing_off: bool = False
 
-    # ---- lifecycle -------------------------------------------------------
-    def start(self) -> None:
+    # ---- lifecycle (standalone process) ---------------------------------
+    def run_forever(self) -> None:
+        """Foreground entry point for `python -m webapp.worker`."""
+        self._await_db_ready()      # the app runs migrations; wait until the schema exists
         self._requeue_orphans()
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="capinator-worker", daemon=True)
-        self._thread.start()
+        self._persist_state()
+        self._run()
 
     def stop(self) -> None:
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5)
+
+    def _await_db_ready(self) -> None:
+        """Block until the DB is reachable and migrated (a jobs-table read succeeds)."""
+        while not self._stop.is_set():
+            with _session() as db:
+                try:
+                    db.scalar(select(func.count()).select_from(Job))
+                    return
+                except (OperationalError, ProgrammingError) as e:
+                    log.warning("database not ready (%s) — retrying in %ss",
+                                type(e).__name__, READINESS_RETRY_SECONDS)
+                    self._stop.wait(READINESS_RETRY_SECONDS)
 
     def _requeue_orphans(self) -> None:
         """A job left 'running' means the process died mid-job — reset it to queued."""
-        db = SessionLocal()
-        try:
+        with _session() as db:
             orphans = db.scalars(select(Job).where(Job.status == "running")).all()
             for job in orphans:
                 job.status = "queued"
             if orphans:
                 db.commit()
-        finally:
-            db.close()
 
     # ---- main loop -------------------------------------------------------
     def _maybe_purge(self) -> None:
@@ -65,22 +120,29 @@ class Worker:
         if now - self._last_purge < PURGE_INTERVAL_SECONDS:
             return
         self._last_purge = now
-        db = SessionLocal()
-        try:
-            purge_expired_guest_jobs(db)
-        finally:
-            db.close()
+        with _session() as db:
+            deleted = purge_expired_guest_jobs(db)
+            if deleted:
+                log.info("purged %d expired guest job(s)", deleted)
 
     def _run(self) -> None:
+        # NOTE: the idle path is deliberately silent — this loop ticks every POLL_SECONDS
+        # and logging each tick would bury the interesting events.
         while not self._stop.is_set():
             self._maybe_purge()
             if self._should_backoff():
-                self.backing_off = True
+                if not self.backing_off:
+                    self.backing_off = True
+                    log.warning("DigiKey quota low (%s remaining) — pausing for %.0fs",
+                                self.rate_limit_remaining, BACKOFF_SECONDS)
+                    self._persist_state()
                 self._stop.wait(BACKOFF_SECONDS)
                 # Force a fresh reading on the next real query after the window resets.
                 self.rate_limit_remaining = None
                 continue
-            self.backing_off = False
+            if self.backing_off:
+                log.info("quota window reset — resuming")
+                self.backing_off = False
 
             job_id = self._claim_next_job()
             if job_id is None:
@@ -96,8 +158,7 @@ class Worker:
 
     def _claim_next_job(self) -> Optional[int]:
         """Atomically pick the oldest queued job and mark it running; return its id."""
-        db = SessionLocal()
-        try:
+        with _session() as db:
             job = db.scalars(
                 select(Job).where(Job.status == "queued").order_by(Job.created_at).limit(1)
             ).first()
@@ -106,8 +167,6 @@ class Worker:
             job.status = "running"
             db.commit()
             return job.id
-        finally:
-            db.close()
 
     def _get_client(self, component_type: str) -> Any:
         client = self._clients.get(component_type)
@@ -117,11 +176,13 @@ class Worker:
         return client
 
     def _process(self, job_id: int) -> None:
-        db = SessionLocal()
-        try:
+        started = time.monotonic()
+        with _session() as db:
             job = db.get(Job, job_id)
             if job is None:
                 return
+            log.info("job %s claimed (%s, %d components)", job_id, job.component_type,
+                     len(job.input_components or []))
             try:
                 resolver = get_resolver(job.component_type)
                 api = self._get_client(job.component_type)
@@ -132,32 +193,52 @@ class Worker:
                 job.status = "done"
                 self._snapshot_from_client(api)
                 job.remaining_quota = self.rate_limit_remaining
+                log.info(
+                    "job %s done in %.1fs — %d DigiKey calls, %s quota remaining%s",
+                    job_id, time.monotonic() - started, result.digikey_calls,
+                    self.rate_limit_remaining if self.rate_limit_remaining is not None else "?",
+                    f" ({len(result.errors)} row note(s))" if result.errors else "",
+                )
             except Exception as e:  # missing creds, API failure, unknown type, ...
                 job.status = "error"
                 job.error = str(e)
+                log.error("job %s failed after %.1fs: %s",
+                          job_id, time.monotonic() - started, e)
             finally:
                 job.finished_at = utcnow()
                 db.commit()
-        finally:
-            db.close()
+        self._persist_state()  # mirror the latest rate-limit state to the DB for the web tier
 
     def _snapshot_from_client(self, api: Any) -> None:
         self.rate_limit_limit = getattr(api, "rate_limit_limit", self.rate_limit_limit)
         self.rate_limit_remaining = getattr(api, "rate_limit_remaining", self.rate_limit_remaining)
 
+    def _persist_state(self) -> None:
+        with _session() as db:
+            save_worker_state(
+                db, limit=self.rate_limit_limit,
+                remaining=self.rate_limit_remaining, backing_off=self.backing_off,
+            )
 
-# Process-wide singleton.
+
+# Process-wide singleton (also reused by tests, which call `_process` directly).
 worker = Worker()
 
 
-def quota_snapshot(db) -> Dict[str, Any]:
-    """Live usage snapshot for GET /quota: worker rate-limit state + queue depth."""
-    queued = db.scalar(select(func.count()).select_from(Job).where(Job.status == "queued"))
-    running = db.scalar(select(func.count()).select_from(Job).where(Job.status == "running"))
-    return {
-        "rate_limit_limit": worker.rate_limit_limit,
-        "rate_limit_remaining": worker.rate_limit_remaining,
-        "backing_off": worker.backing_off,
-        "queued": queued or 0,
-        "running": running or 0,
-    }
+def main() -> None:
+    """`python -m webapp.worker`: run the worker until SIGTERM/SIGINT."""
+    configure_logging()  # stdout, verbosity from LOG_LEVEL
+
+    def _handle(signum, _frame):
+        log.info("received signal %s — shutting down", signum)
+        worker.stop()
+
+    signal.signal(signal.SIGTERM, _handle)
+    signal.signal(signal.SIGINT, _handle)
+    log.info("capinator worker starting")
+    worker.run_forever()
+    log.info("capinator worker stopped")
+
+
+if __name__ == "__main__":
+    main()

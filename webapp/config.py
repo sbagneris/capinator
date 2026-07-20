@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # Storage
     database_url: str = "sqlite:///./capinator.db"
 
+    # Logging verbosity for our own code (DEBUG shows per-row + per-DigiKey-call detail).
+    log_level: str = "INFO"
+
     # Sessions / auth
     secret_key: str = "dev-insecure-change-me"
     cookie_secure: bool = False  # set true in prod (HTTPS) so the session cookie is Secure

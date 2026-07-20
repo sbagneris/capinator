@@ -14,9 +14,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from webapp.api import api_app
 from webapp.config import settings
 from webapp.db import Base, SessionLocal, engine
+from webapp.logging_setup import configure_logging
 from webapp.routers import account, admin, jobs, pages
 from webapp.seed import seed_from_file_if_present
-from webapp.worker import worker
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -34,14 +34,12 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    worker.start()
-    try:
-        yield
-    finally:
-        worker.stop()
+    # The DigiKey worker runs as its own process (`python -m webapp.worker`), not here.
+    yield
 
 
 def create_app() -> FastAPI:
+    configure_logging()  # our loggers honour LOG_LEVEL here too (uvicorn has its own)
     # No OpenAPI/docs on the main app: it serves HTML, not a public API. The public
     # API's own OpenAPI schema + docs live on the mounted sub-app at /api/docs.
     app = FastAPI(
