@@ -1,0 +1,25 @@
+# Keep the image small and free of local/dev/secret files.
+.git
+.gitignore
+.venv/
+**/__pycache__/
+.pytest_cache/
+tests/
+examples/
+
+# Local data / secrets — never bake into the image
+.env
+secrets.sh
+*.db
+*.sqlite3
+**/facet_cache.json
+bulk.csv
+response_*.json
+
+# Deploy/meta files not needed inside the container
+.dockerignore
+Dockerfile
+docker-compose.yml
+Caddyfile
+render.yaml
+.vscode/

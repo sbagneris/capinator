@@ -1,0 +1,59 @@
+# capinator full stack: Postgres + app (uvicorn + in-process worker) + Caddy (auto HTTPS).
+# Configure via a .env file next to this one (see .env.example). Bring up with:
+#   docker compose up -d --build
+name: capinator
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-capinator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-capinator}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-capinator} -d ${POSTGRES_DB:-capinator}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # .env supplies SECRET_KEY, DIGIKEY_*, POSTGRES_*, SEED_*. DATABASE_URL is derived
+    # here (points at the db service) and COOKIE_SECURE is forced on behind Caddy's TLS.
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-capinator}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-capinator}
+      # Fail fast rather than silently falling back to the insecure dev default.
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env (openssl rand -hex 32)}
+      COOKIE_SECURE: "true"
+    expose:
+      - "8000"
+    # NOTE: never set `deploy.replicas` > 1 / add uvicorn workers — one process only, so
+    # the single background thread stays the sole DigiKey-serializing worker.
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env (a real hostname for Let's Encrypt, or a local name for self-signed TLS)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # ACME account + issued certs (persist these!)
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
